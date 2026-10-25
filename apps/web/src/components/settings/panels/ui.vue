@@ -20,7 +20,7 @@
         @change="value => typeof value === 'number' && updateUiSettings({ mobileScale: value })" />
     </section>
 
-    <section class="settingSection" aria-labelledby="languageTitle">
+    <section v-if="!comicStudio" class="settingSection" aria-labelledby="languageTitle">
       <h3 id="languageTitle"><icon-language :size="18" />语言</h3>
       <p class="description">界面语言立即生效，默认跟随电脑语言。</p>
       <languageSelect class="languageCards" />
@@ -120,7 +120,7 @@
     <el-card class="appearancePreview" shadow="never">
       <div class="previewIcon"><icon-sparkles :size="20" /></div>
       <div class="previewText">
-        <strong>Toonflow 每一个灵感，都值得被看见</strong>
+        <strong>{{ comicStudio ? "小冷漫画 · 把生活画成故事" : "Toonflow 每一个灵感，都值得被看见" }}</strong>
         <p>这是当前颜色、字体与圆角的实际效果。</p>
       </div>
       <el-tag type="primary" effect="light">预览</el-tag>
@@ -133,6 +133,7 @@
 </template>
 
 <script setup lang="ts">
+const { comicStudio = false } = defineProps<{ comicStudio?: boolean }>();
 import { nextTick, ref, watchEffect } from "vue";
 import {
   IconSun,

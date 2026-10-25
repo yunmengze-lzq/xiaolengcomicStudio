@@ -11,7 +11,7 @@
     :showClose="!saving"
     @closed="formApi = undefined">
     <div class="providerEditor">
-      <messageMarkdown v-if="provider?.readme" class="providerReadme" :content="provider.readme" />
+      <messageMarkdown v-if="provider?.readme && !hideReadme" class="providerReadme" :content="provider.readme" />
       <form-create v-model="formValues" v-model:api="formApi" :rule="formRules" :option="formOptions" />
       <div class="modelHeader">
         <h4>模型配置 <el-text type="info">{{ models.length }}</el-text></h4>
@@ -67,7 +67,7 @@ import type { MediaProvider, MediaProviderModel } from "./types";
 import { settings, saveSettings } from "@/stores/settings";
 import { invalidateNodeModels } from "@toonflow/nodes-scaffold/nodeAi";
 
-const { provider } = defineProps<{ provider?: MediaProvider }>();
+const { provider } = defineProps<{ hideReadme?: boolean;  provider?: MediaProvider }>();
 const modelEditorDialog = shallowRef<Component>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ saved: [provider: MediaProvider] }>();

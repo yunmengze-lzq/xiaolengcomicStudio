@@ -30,8 +30,8 @@
             <h3>{{ activeProvider.label }}</h3>
             <el-tag v-if="activeProvider.version" size="small" type="info" effect="plain">v{{ activeProvider.version }}</el-tag>
           </div>
-          <messageMarkdown v-if="providerReadme" class="providerReadme" :content="providerReadme" />
-          <el-divider v-if="providerReadme" contentPosition="left">连接配置</el-divider>
+          <messageMarkdown v-if="providerReadme && (!comicStudio || selectedProvider === 'comfyLocal')" class="providerReadme" :content="providerReadme" />
+          <el-divider v-if="providerReadme && (!comicStudio || selectedProvider === 'comfyLocal')" contentPosition="left">连接配置</el-divider>
           <form-create v-model:api="formApi" :rule="providerRules" :option="formOptions" />
           <div class="modelHeader">
             <el-text tag="strong">模型列表 <el-text type="info">{{ models.length }}</el-text></el-text>
@@ -116,7 +116,7 @@ import { modelChoices, saveSettings } from "@/stores/settings";
 import { writeClipboardText } from "@/lib/clipboard";
 import { isMobile } from "@/lib/platform";
 
-const { mode = "custom" } = defineProps<{ mode?: "builtin" | "custom" }>();
+const { mode = "custom", comicStudio = false } = defineProps<{ mode?: "builtin" | "custom"; comicStudio?: boolean }>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ added: [provider: MediaProvider] }>();
 const providerSources: Record<string, string> = { tfRouter: tfRouterSource, apiMart: apiMartSource, metaso: metasoSource, compshare: compshareSource };

@@ -21,8 +21,8 @@
             <h3>{{ activeProvider.label }}</h3>
             <el-tag v-if="activeProvider.version" size="small" type="info" effect="plain">v{{ activeProvider.version }}</el-tag>
           </div>
-          <messageMarkdown v-if="providerReadme" class="providerReadme" :content="providerReadme" />
-          <el-divider v-if="providerReadme" contentPosition="left">连接配置</el-divider>
+          <messageMarkdown v-if="providerReadme && !comicStudio" class="providerReadme" :content="providerReadme" />
+          <el-divider v-if="providerReadme && !comicStudio" contentPosition="left">连接配置</el-divider>
           <form-create v-model="formValues" v-model:api="formApi" :rule="providerRules" :option="formOptions" />
           <div class="modelHeader">
             <el-text tag="strong">模型列表 <el-text type="info">{{ models.length }}</el-text></el-text>
@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+const { comicStudio = false } = defineProps<{ comicStudio?: boolean }>();
 import { computed, ref, shallowRef, watch } from "vue";
 import axios from "axios";
 import { IconRefresh } from "@tabler/icons-vue";

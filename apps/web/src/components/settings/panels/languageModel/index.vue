@@ -3,18 +3,18 @@
     <div class="itemList">
       <el-card v-for="item in sortedProviders" :key="item.id" class="providerItem" shadow="never">
         <div class="providerHeader">
-          <div v-if="item.icon || isTfRouterProvider(item)" class="providerMark" aria-hidden="true">
+          <div v-if="item.icon || (!comicStudio && isTfRouterProvider(item))" class="providerMark" aria-hidden="true">
             <img class="providerLogo" :class="{ monochrome: isTfRouterProvider(item) }" :src="item.icon || logoUrl" alt="" />
           </div>
           <div class="providerInfo">
             <div class="providerHeading">
               <el-text class="providerName" tag="strong">{{ item.label }}</el-text>
-              <el-tag v-if="isTfRouterProvider(item)" size="small">官方</el-tag>
+              <el-tag v-if="!comicStudio && isTfRouterProvider(item)" size="small">官方</el-tag>
             </div>
             <el-text class="providerId" size="small" type="info" :title="item.id">{{ item.id }}</el-text>
           </div>
         </div>
-        <tfAccount v-if="isTfRouterProvider(item)" :apiKey="typeof item.apiKey === 'string' ? item.apiKey : ''" :visible="visible" :saveApiKey="(key) => saveProviderApiKey(item.id, key)" />
+        <tfAccount v-if="!comicStudio && isTfRouterProvider(item)" :apiKey="typeof item.apiKey === 'string' ? item.apiKey : ''" :visible="visible" :saveApiKey="(key) => saveProviderApiKey(item.id, key)" />
         <div class="providerFooter">
           <div class="providerMeta">
             <el-tag v-if="getProviderVersion(item)" size="small" type="info" effect="plain">v{{ getProviderVersion(item) }}</el-tag>
@@ -30,11 +30,12 @@
         </div>
       </el-card>
     </div>
+    <p v-if="comicStudio && !sortedProviders.length" class="providerEmpty">还没有文本API服务。可在默认任务中使用本机Codex，或在这里添加你的供应商。</p>
     <div class="providerActions">
       <el-button class="addButton" :icon="IconPlus" @click="openProvider">添加供应商</el-button>
       <el-button class="addButton" :icon="IconSettings" @click="openCustomProvider()">添加自定义供应商</el-button>
     </div>
-    <component :is="addProviderDialog" v-model="providerDialogVisible" />
+    <component :is="addProviderDialog" v-model="providerDialogVisible" :comicStudio="comicStudio" />
     <component :is="addCustomProviderDialog" v-model="customProviderDialogVisible" :provider="editingProvider" />
   </div>
 </template>
@@ -50,7 +51,7 @@ import logoUrl from "@toonflow/assets/logo.svg";
 import tfAccount from "../../tfAccount.vue";
 import { isTfRouterProvider } from "@/lib/tf";
 
-const { visible = true } = defineProps<{ visible?: boolean }>();
+const { visible = true, comicStudio = false } = defineProps<{ visible?: boolean; comicStudio?: boolean }>();
 const addProviderDialog = shallowRef<Component>();
 const addCustomProviderDialog = shallowRef<Component>();
 const providerDialogVisible = ref(false);
@@ -58,7 +59,7 @@ const customProviderDialogVisible = ref(false);
 const editingProvider = ref<CustomProvider>();
 const deletingId = ref("");
 const fetchingId = ref("");
-const sortedProviders = computed(() => [...customProviders.value].sort((a, b) => Number(isTfRouterProvider(b)) - Number(isTfRouterProvider(a))));
+const sortedProviders = computed(() => [...customProviders.value].filter(item => !comicStudio || !isTfRouterProvider(item) || !!item.apiKey?.trim() || item.models.length > 0).sort((a, b) => Number(isTfRouterProvider(b)) - Number(isTfRouterProvider(a))));
 
 function getProviderVersion(provider: CustomProvider) {
   const version = languageProviders.find(item => item.id.toLowerCase() === provider.id.toLowerCase())?.version ?? provider.version;

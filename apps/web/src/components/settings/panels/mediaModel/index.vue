@@ -3,19 +3,19 @@
     <div class="itemList">
       <el-card v-for="item in sortedProviders" :key="item.fileName" class="providerItem" shadow="never">
         <div class="providerHeader">
-          <div v-if="item.icon || item.id.toLowerCase() === 'tfrouter'" class="providerMark" aria-hidden="true">
+          <div v-if="item.icon || (!comicStudio && item.id.toLowerCase() === 'tfrouter')" class="providerMark" aria-hidden="true">
             <img class="providerLogo" :class="{ monochrome: item.id.toLowerCase() === 'tfrouter' }" :src="item.icon || logoUrl" alt="" />
           </div>
           <div class="providerInfo">
             <div class="providerHeading">
               <el-text class="providerName" tag="strong">{{ item.label }}</el-text>
-              <el-tag v-if="item.id.toLowerCase() === 'tfrouter'" size="small">官方</el-tag>
+              <el-tag v-if="!comicStudio && item.id.toLowerCase() === 'tfrouter'" size="small">官方</el-tag>
             </div>
             <el-text class="providerId" size="small" type="info" :title="item.fileName">{{ item.fileName }}</el-text>
           </div>
         </div>
         <el-alert v-if="item.loadError" :title="item.loadError" type="error" :closable="false" showIcon />
-        <tfAccount v-if="item.id.toLowerCase() === 'tfrouter'" :apiKey="getProviderApiKey(item.id)" :visible="visible" :saveApiKey="(key) => saveProviderApiKey(item.id, key)" />
+        <tfAccount v-if="!comicStudio && item.id.toLowerCase() === 'tfrouter'" :apiKey="getProviderApiKey(item.id)" :visible="visible" :saveApiKey="(key) => saveProviderApiKey(item.id, key)" />
         <div class="providerFooter">
           <div class="providerMeta">
             <el-tag v-if="item.version" size="small" type="info" effect="plain">v{{ item.version }}</el-tag>
@@ -31,12 +31,13 @@
         </div>
       </el-card>
     </div>
+    <p v-if="comicStudio && !sortedProviders.length" class="providerEmpty">尚未配置生图服务。添加你使用的图片API，或选择本地ComfyUI。预装供应商可从「添加供应商」中选择。</p>
     <div class="providerActions">
       <el-button class="addButton" :icon="IconPlus" @click="openAdd('builtin')">添加供应商</el-button>
       <el-button class="addButton" :icon="IconSettings" @click="openAdd('custom')">添加自定义供应商</el-button>
     </div>
-    <component :is="mediaProviderDialog" v-model="providerDialogVisible" :mode="addMode" @added="saveProviderItem" />
-    <component :is="editProviderDialog" v-model="editorVisible" :provider="editingProvider" @saved="saveProviderItem" />
+    <component :is="mediaProviderDialog" v-model="providerDialogVisible" :mode="addMode" :comicStudio="comicStudio" @added="saveProviderItem" />
+    <component :is="editProviderDialog" v-model="editorVisible" :provider="editingProvider" :hideReadme="comicStudio" @saved="saveProviderItem" />
   </div>
 </template>
 
@@ -51,11 +52,11 @@ import { settings, saveSettings } from "@/stores/settings";
 import { invalidateNodeModels } from "@toonflow/nodes-scaffold/nodeAi";
 import tfAccount from "../../tfAccount.vue";
 
-const { visible = true } = defineProps<{ visible?: boolean }>();
+const { visible = true, comicStudio = false } = defineProps<{ visible?: boolean; comicStudio?: boolean }>();
 const mediaProviderDialog = shallowRef<Component>();
 const editProviderDialog = shallowRef<Component>();
 const providers = ref<MediaProvider[]>([]);
-const sortedProviders = computed(() => [...providers.value].sort((a, b) => Number(b.id.toLowerCase() === "tfrouter") - Number(a.id.toLowerCase() === "tfrouter")));
+const sortedProviders = computed(() => [...providers.value].filter(item => !comicStudio || !["tfrouter", "apimart", "metaso", "compshare"].includes(item.id.toLowerCase()) || !!getProviderApiKey(item.id)).sort((a, b) => Number(b.id.toLowerCase() === "tfrouter") - Number(a.id.toLowerCase() === "tfrouter")));
 const loaded = ref(false);
 const providerDialogVisible = ref(false);
 const editorVisible = ref(false);

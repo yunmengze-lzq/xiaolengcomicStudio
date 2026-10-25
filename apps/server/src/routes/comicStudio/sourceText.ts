@@ -1,0 +1,21 @@
+import { Router } from "express";
+import { z } from "zod";
+import u from "@/utils";
+import { validateFields } from "@/lib/middleware";
+import { success } from "@/lib/responseFormat";
+import { readSource } from "@/utils/comicStudio/source";
+const input = z.object({ url: z.url().max(2000) });
+export default Router().post("/", validateFields(input.shape), async (req, res) => {
+  u.mcpControl.assertAppRequest(req);
+  if (!u.workspace.isLocalWorkspaceRequest(req)) throw Object.assign(new Error("素材正文仅允许本机读取"), { status: 403 });
+  const url = new URL(input.parse(req.body).url);
+  const noteId = url.pathname.match(/^\/explore\/([a-f0-9]{24})(?:\/|$)/)?.[1];
+  const token = url.searchParams.get("xsec_token");
+  if (url.protocol !== "https:" || url.username || url.password || url.port || !["www.xiaohongshu.com", "xiaohongshu.com"].includes(url.hostname) || !noteId || !token) throw Object.assign(new Error("需要本人搜索返回的小红书标准笔记链接"), { status: 400 });
+  const raw = JSON.parse(await readSource("http://127.0.0.1:18060/api/v1/feeds/detail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feed_id: noteId, xsec_token: token, load_all_comments: false }) }));
+  const parsed = z.object({ success: z.literal(true), data: z.object({ data: z.object({ note: z.object({ title: z.string().max(1000), desc: z.string().max(20000).optional(), type: z.string().max(50).optional() }) }) }) }).safeParse(raw);
+  if (!parsed.success) throw Object.assign(new Error("笔记正文暂不可读，请检查会话或打开来源核对"), { status: 502 });
+  const note = parsed.data.data.data.note;
+  if (!note.desc?.trim()) throw Object.assign(new Error("当前笔记没有可读取的文字正文；图片文字、视频语音和字幕尚未转写"), { status: 422 });
+  res.set("Cache-Control", "no-store").json(success({ title: note.title, text: note.desc.slice(0, 16000), type: note.type || "", collectedAt: new Date().toISOString(), limitation: "仅笔记文字正文；不包含图片文字、视频语音或字幕，不等于完整原剧本" }));
+});

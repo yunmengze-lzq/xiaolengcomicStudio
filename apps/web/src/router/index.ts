@@ -5,7 +5,11 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      redirect: "/hello",
+      redirect: "/comicStudio",
+    },
+    {
+      path: "/comicStudio",
+      component: () => import("@/pages/comicStudio/index.vue"),
     },
     {
       path: "/hello",

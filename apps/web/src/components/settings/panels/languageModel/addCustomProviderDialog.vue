@@ -156,7 +156,6 @@ import {
   IconSearch,
 } from "@tabler/icons-vue";
 import { saveSettings, type CustomProvider, type CustomProviderModel } from "@/stores/settings";
-import { languageProviders } from "@toonflow/providers";
 import { isTfRouterProvider } from "@/lib/tf";
 import { thinkingLevels, type ThinkingLevel, type ReasoningEfforts } from "@toonflow/server/modelReasoning";
 
@@ -380,8 +379,7 @@ async function addProvider() {
     await saveSettings(settings => {
       const existing = settings.customProviders;
       if (existing !== undefined && !Array.isArray(existing)) throw new Error("已保存的供应商配置格式不正确");
-      if (languageProviders.some(item => item.id !== providerId && item.id.toLowerCase() === updatedProvider.id.toLowerCase())
-        || existing?.some(item => typeof item?.id === "string" && item.id !== providerId && item.id.toLowerCase() === updatedProvider.id.toLowerCase())) {
+      if (existing?.some(item => typeof item?.id === "string" && item.id !== providerId && item.id.toLowerCase() === updatedProvider.id.toLowerCase())) {
         throw new Error("Provider ID 已存在");
       }
       if (providerId && !existing?.some(item => item.id === providerId)) throw new Error("供应商已不存在");
