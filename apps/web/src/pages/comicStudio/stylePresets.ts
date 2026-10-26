@@ -8,6 +8,13 @@ export const stylePresets = [
 ];
 export type StylePreset = typeof stylePresets[number];
 
+export const dailyAnimeStyle: StylePreset = {
+  id: "dailyAnime", name: "生活日漫四格", tag: "日常喜剧 · 表情戏 · 正常动漫比例", paper: "#fff9ed", ink: "#302c29", accent: "#ed7279", second: "#d8c7a4",
+  description: "Natural-proportion slice-of-life anime manga, fine lines, soft cel shading, expressive faces, lived-in interiors.\n正常动漫人物比例，约5–6头身，非Q版；清晰眼眉嘴表演，柔和肤色和淡腮红，头发有分束高光，服装褶皱适量；房间、家具和生活道具具有前中后景与暖色自然光。每页2×2四格，铺垫→误会→升级→反转；近景、中景、过肩镜头按剧情变化，禁止连续重复两人站立全身照；每格一个明确动作。提前为对白气泡安排空位，不遮脸、手或关键道具；文字和椭圆白底黑边尖尾气泡由排版层添加。参考视觉语言，不复制参考人物或剧情。",
+  avoid: "Q版、大头短身、立绘拼贴、重复站姿、空白脸、人物混脸、塑料3D、照片人物、厚重油画、模型内文字和气泡",
+  source: "Clip Studio · 漫画构图与表演", url: "https://www.clipstudio.net/en/comics-manga/comic-creation/",
+};
+
 export const githubStyles = [
   { id: "fantasy", name: "奇幻卡通叙事", image: "https://raw.githubusercontent.com/jamez-bondos/awesome-gpt4o-images/main/cases/39/example_fantasy_computer_head_portal.png", url: "https://github.com/jamez-bondos/awesome-gpt4o-images#cases-39", credit: "图 © @jamez-bondos · CC BY 4.0；提示词作者 @dotey", prompt: "原创奇幻卡通漫画。具有辨识度的几何角色轮廓、明亮配色、柔和发光、细节丰富而层次清楚的自然环境。用场景中的奇妙装置表达人物心理变化，镜头优先突出表情与动作，保持角色身份与服装一致。" },
   { id: "paper", name: "立体纸雕绘本", image: "https://raw.githubusercontent.com/jamez-bondos/awesome-gpt4o-images/main/cases/32/3d_papercraft_popup_book.png", url: "https://github.com/jamez-bondos/awesome-gpt4o-images#cases-32", credit: "图 © @jamez-bondos · CC BY 4.0；提示词作者 @dotey；示例含既有角色，仅参考纸艺方法", prompt: "原创现代生活纸雕绘本漫画。多层折叠纸张、明显纸边与柔和投影、统一正面或轻微俯视视角，暖色纸张搭配青绿与橙红。原创成年人物、咖啡馆和工作空间均由层叠纸片组成，构图有前中后景与清晰视觉焦点。" },

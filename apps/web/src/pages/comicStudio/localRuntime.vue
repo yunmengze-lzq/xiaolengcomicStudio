@@ -1,5 +1,5 @@
 <template>
-  <div class="runtimeSettings"><section><h3>如何选择本地或在线生图</h3><ol><li>本机 Z-Image：检测就绪 → 设为默认生图模型。</li><li>本机 ComfyUI：先启动服务并准备工作流 → 检测 → 去生图模型添加「本地 ComfyUI」。</li><li>在线图片 API：在生图模型添加「在线图片 API」，填写地址、密钥和图片模型ID。</li><li>最后在默认任务选择生图模型。角色、画风和漫画共用该选择，随时可以切换。</li></ol><p>Codex 生图需要联网并使用账号额度；它不属于离线本机模型。图片分析需要支持识图的文本模型，Z-Image本身不负责分析。</p></section><p>这里连接已在本机运行的服务。软件不会自动下载大模型或启动 GPU 任务；检测可用后再用于创作。</p><section><h3>Z-Image Turbo · 本机 MLX 生图</h3><p>Apple Silicon 专用，4-bit 量化；默认768×1024、9步，分格出图可切换草稿或细节优先；保留低内存加载。文生图与单张图生图，不支持多角色参考图锁定。不调用云端 API。</p><button :disabled="!!working" @click="probeZImage">检测本地 Z-Image</button><p role="status">{{ zImageMessage }}</p><p v-if="zImageRoot">本地环境与模型目录：<code>{{ zImageRoot }}</code></p><button :disabled="!zImageReady || !!working" @click="emit('imageConnected', 'zImage/turbo4bit')">设为默认生图模型</button></section><section v-for="service in services" :key="service.id"><h3>{{ service.label }}</h3><p>{{ service.description }}</p><label :for="`port${service.id}`">本机端口</label><input :id="`port${service.id}`" v-model.number="ports[service.id]" type="number" min="1024" max="65535" /><button :disabled="!!working" @click="probe(service.id)">检测服务与模型</button><p role="status">{{ statuses[service.id]?.message || '尚未检测' }}</p><button v-if="service.id !== 'comfy'" :disabled="!!working || !statuses[service.id]?.models.length" @click="connect(service.id)">添加到文本模型</button><button v-else @click="emit('images')">去生图模型配置 ComfyUI 工作流</button><a :href="service.docs" target="_blank" rel="noopener noreferrer">官方文档 ↗</a></section><p v-if="error" role="alert">{{ error }}</p></div>
+  <div class="runtimeSettings"><section><h3>如何选择本地或在线生图</h3><ol><li>本机模型：固定角色选 FLUX.2 klein 多参考；草稿可选 Z-Image。</li><li>本机 ComfyUI：先启动服务并准备工作流 → 检测 → 去生图模型添加「本地 ComfyUI」。</li><li>在线图片 API：在生图模型添加「在线图片 API」，填写地址、密钥和图片模型ID。</li><li>最后在默认任务选择生图模型。角色、画风和漫画共用该选择，随时可以切换。</li></ol><p>Codex 生图需要联网并使用账号额度；它不属于离线本机模型。图片分析需要支持识图的文本模型，Z-Image本身不负责分析。</p></section><p>这里连接已在本机运行的服务。软件不会自动下载大模型或启动 GPU 任务；检测可用后再用于创作。</p><section><h3>Z-Image Turbo · 本机 MLX 生图</h3><p>Apple Silicon 专用，4-bit 量化；默认768×1024、9步，分格出图可切换草稿或细节优先；保留低内存加载。文生图与单张图生图，不支持多角色参考图锁定。不调用云端 API。</p><button :disabled="!!working" @click="probeZImage">检测本地 Z-Image</button><p role="status">{{ zImageMessage }}</p><p v-if="zImageRoot">本地环境与模型目录：<code>{{ zImageRoot }}</code></p><button :disabled="!zImageReady || !!working" @click="emit('imageConnected', 'zImage/turbo4bit')">设为默认生图模型</button></section><section><h3>FLUX.2 klein · 本机多角色参考</h3><p>4-bit量化、4步，复用MLX环境。每格实际读取正式角色图，保留各自外形与服装，改变场景和动作；最多4张参考。人物一致性需要生成后审核。</p><button :disabled="!!working" @click="probeZImage">检测本地多参考模型</button><p role="status">{{ kleinMessage }}</p><p v-if="kleinRoot">权重目录：<code>{{ kleinRoot }}</code></p><button :disabled="!kleinReady || !!working" @click="emit('imageConnected', 'fluxKlein/klein4bit')">设为默认生图模型</button></section><section v-for="service in services" :key="service.id"><h3>{{ service.label }}</h3><p>{{ service.description }}</p><label :for="`port${service.id}`">本机端口</label><input :id="`port${service.id}`" v-model.number="ports[service.id]" type="number" min="1024" max="65535" /><button :disabled="!!working" @click="probe(service.id)">检测服务与模型</button><p role="status">{{ statuses[service.id]?.message || '尚未检测' }}</p><button v-if="service.id !== 'comfy'" :disabled="!!working || !statuses[service.id]?.models.length" @click="connect(service.id)">添加到文本模型</button><button v-else @click="emit('images')">去生图模型配置 ComfyUI 工作流</button><a :href="service.docs" target="_blank" rel="noopener noreferrer">官方文档 ↗</a></section><p v-if="error" role="alert">{{ error }}</p></div>
 </template>
 <script setup lang="ts">
 import { reactive, ref, watch } from "vue";
@@ -9,6 +9,9 @@ const emit = defineEmits<{ connected: [model: string]; images: []; imageConnecte
 const zImageMessage = ref("点击检测环境与模型下载状态");
 const zImageReady = ref(false);
 const zImageRoot = ref("");
+const kleinMessage = ref("点击检测多参考模型下载状态");
+const kleinReady = ref(false);
+const kleinRoot = ref("");
 async function probeZImage() {
   working.value = "zImage";
   try {
@@ -16,6 +19,10 @@ async function probeZImage() {
     zImageMessage.value = data.data.message;
     zImageRoot.value = data.data.root || "";
     zImageReady.value = data.data.installed && data.data.modelReady;
+    const klein = data.data.fluxKlein;
+    kleinReady.value = !!klein?.installed && !!klein.modelReady;
+    kleinRoot.value = klein?.root || "";
+    kleinMessage.value = kleinReady.value ? "多参考编辑已就绪 · 本机运行，无API费用" : "模型未下载完整或缺少MLX编辑环境";
   } catch { zImageMessage.value = "本地模型状态读取失败，请重试"; }
   finally { working.value = ""; }
 }

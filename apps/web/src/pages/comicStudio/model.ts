@@ -296,11 +296,11 @@ export function characterVisual(character: Character) {
 export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">, local = false) {
   if (local) {
     const views = { sheet: "同一个角色的正面全身、侧面和面部特写三种视角，纯色背景", turnaround: "同一个角色的正面、侧面、背面全身三视图，纯色背景", expressions: "同一张脸的六种表情：平静、开心、惊讶、担心、生气、困倦", portrait: "单个人物半身头像，仅一个视角", fullBody: "单个人物全身立绘，仅一个视角，脚部完整" };
-    return `${views[character.designView]}。${characterVisual(character).slice(0, 260)}。当前设计要求：${character.description.slice(0, 140)}。性格表现：${character.personality.slice(0, 60)}。画风：${style.description.split(/\n/)[0]?.slice(0, 80)}；${character.artDirection.slice(0, 70)}。保持每个视角的发型、脸部与服装相同，衣服和背景为干净无字表面，画面只呈现人物造型。当前输出视图优先于旧分析中的构图和姿势建议。`;
+    return `${views[character.designView]}。${characterVisual(character).slice(0, 260)}。当前设计要求：${character.description.slice(0, 140)}。性格表现：${character.personality.slice(0, 60)}。全篇画风：${style.description.split(/\n/)[0]?.slice(0, 160)}。角色补充画风：${character.artDirection.slice(0, 70)}，服从全篇画风。保持每个视角的发型、脸部与服装相同，衣服和背景为干净无字表面，画面只呈现人物造型。当前输出视图优先于旧分析中的构图和姿势建议。`;
   }
   const views = { turnaround: "One character turnaround sheet with full-body front, side and back views of exactly the same character and outfit.", expressions: "One expression reference sheet: the same character face in six expressions (neutral, happy, surprised, worried, angry, sleepy), stable hairstyle and facial features.", sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
   const intent = { redesign: "Extract distinctive elements AND the visual style, then design a NEW original character. For a logo, object or animal, reinterpret its colours, silhouette and motifs into the requested person or mascot. Do NOT reproduce the input image, layout, collage or original pose.", identity: "Preserve the referenced character identity and outfit; create the requested new views or pose rather than duplicating the original image.", style: "Use ONLY linework, palette, shading and proportions from the reference; invent a new identity from the user's description. Do not copy the original character or composition." };
-  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nPersonality to convey through visual attitude: ${character.personality}. Motivation: ${character.motivation}\nVisual identity: ${characterVisual(character)}\nReference analysis is source material only; current user description, selected output views, personality and art direction override any old layout/pose suggestions or IP/name commentary. Reviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
+  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nPersonality to convey through visual attitude: ${character.personality}. Motivation: ${character.motivation}\nVisual identity: ${characterVisual(character)}\nReference analysis is source material only; current user description, selected output views, personality and art direction override any old layout/pose suggestions or IP/name commentary. Reviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nGlobal art direction (takes priority over older character art notes): ${style.description}\nAdditional character art notes: ${character.artDirection}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
 }
 
 export function referenceReady(target: { refs: { path: string }[]; referenceIntent: string; referenceAnalysis: string; analysisFingerprint: string }) {
@@ -353,6 +353,37 @@ export function imagePrompt(episode: Episode, panel: Panel, useReferences = true
       : []),
     ...(useReferences && !referenceIsCurrent && !referenceOverride ? [`Reference order: ${referencePaths(episode, panel).map((path, index) => { const character = cast.find((item) => item.image === path); return `${index + 1}: ${character ? `IDENTITY reference for ${character.name}; preserve face, hair, outfit and species, but render the current action` : episode.styleSnapshot?.refs.some((item) => item.path === path) ? "STYLE ONLY; use rendering, not the depicted character or composition" : "previous scene for continuity only; never copy its pose"}`; }).join("; ")}. Role identity references take priority over style and previous-frame people. Each named character appears once in the requested pose.`] : []),
   ].join("\n\n");
+}
+
+export function identityPanelInput(episode: Episode, panel: Panel) {
+  const cast = panel.characters.map((id) => episode.castSnapshot.find((person) => person.id === id));
+  if (cast.some((person) => !person?.image)) throw new Error("固定角色出图需要本格每位角色的正式参考图，请先到角色与美术补齐并同步本期设定");
+  const people = cast.filter((person): person is Character => !!person);
+  if (people.length > 4) throw new Error("本机多参考编辑一次最多4位角色，请拆分镜头");
+  const references = people.map((person) => person.image);
+  if (new Set(references).size !== references.length) throw new Error("两位角色使用了同一张正式图，请分别指定各自的角色参考图");
+  const styleReference = references.length < 4 ? episode.styleSnapshot?.refs.find((item) => !references.includes(item.path)) : undefined;
+  if (styleReference) references.push(styleReference.path);
+  const styleReferenceIndex = references.length;
+  const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
+  const sceneReference = panel.image || (previous?.image && previous.characters.length === panel.characters.length && previous.characters.every((id) => panel.characters.includes(id)) ? previous.image : "");
+  const useSceneReference = !!sceneReference && references.length < 4 && !references.includes(sceneReference);
+  if (useSceneReference) references.push(sceneReference);
+  const names = scriptRoleNames(episode);
+  const prompt = panel.imagePromptOverride.trim() || [
+    `One continuous comic scene, exactly ${people.length} distinct characters, each appearing once. Each reference sheet depicts ONE person.`,
+    ...people.map((person, index) => `Image ${index + 1} = ${person.name.trim()}${names.has(person.id) ? ` (story name: ${names.get(person.id)})` : ""}. Visual identity: ${characterVisual(person).split(/[；;]整体/)[0]!.slice(0, 170)}.`),
+    `Art direction: ${episode.styleSnapshot?.description.split("\n")[0]?.slice(0, 160) || "anime manga"}. Keep each identity distinct.`,
+    ...(styleReference ? [`Image ${styleReferenceIndex}: STYLE ONLY for linework, shading and atmosphere; never copy its people, text, panels or story.`] : []),
+    "Reference identities and clothes override story appearance descriptions. Change only setting, pose and expression. Never mix identities, horns, tails or outfits; never reproduce reference-sheet layouts or labels.",
+    ...(useSceneReference ? [`Image ${references.length}: continuity reference ONLY for identities, clothes and props. Use the NEW shot, action and framing below; do not copy its pose, camera or background when the story changes.`] : []),
+    `Shot: ${panel.shot}. Scene: ${panel.action}`,
+    panel.actionInstruction ? `Action: ${panel.actionInstruction}` : "",
+    ...panel.performances.filter((item) => panel.characters.includes(item.characterId)).map((item) => `${people.find((person) => person.id === item.characterId)?.name}: ${item.emotion}; ${item.expression}; ${item.pose}.`),
+    panel.revisionRequest ? `Correction: ${panel.revisionRequest}` : "",
+    "Expressive faces and clear gestures. Background supports the story. Leave uncluttered space for later lettering, away from faces and hands. No text, speech bubbles or watermark.",
+  ].filter(Boolean).join("\n");
+  return { prompt, references };
 }
 
 export function referencePaths(episode: Episode, panel: Panel) {

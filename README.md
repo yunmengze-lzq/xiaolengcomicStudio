@@ -15,6 +15,8 @@
 
 功能界面不等于所有服务都已实际验收；详见[验证记录](docs/comicStudioVerification.md)和[后续计划](docs/friendTrialPlan.md)。
 
+换电脑、RTX 5060/Windows试用、作品备份与安装包前的限制见[迁移试用说明](docs/portableTrial.md)。本机MLX多参考编辑已跑通双人草稿，人物比例、肢体、动作与成品画质仍在验证中。
+
 ## 本地启动
 
 安装 Bun（项目使用 `bun@1.3.14`），在仓库根目录执行：

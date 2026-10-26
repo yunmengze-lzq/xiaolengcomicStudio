@@ -7,7 +7,7 @@ import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import saveFile from "@/lib/saveFile";
 import { uiSettings, settings as appSettings } from "@/stores/settings";
-import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter } from "./model";
+import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, identityPanelInput, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter } from "./model";
 import type { ComicProject, Topic, Panel, ArtStyle, MemeIdea, Character } from "./model";
 import { keywordInsights } from "./creatorInsights";
 import { renderPages } from "./render";
@@ -383,7 +383,7 @@ export default function useStudio() {
     if (!data.data?.[0]?.path) throw new Error("图片模型没有返回画风样张");
     if (directory.value !== targetDirectory) return;
     const path = data.data[0].path;
-    project.value.assets.push({ path, method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "自定义画风样张", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt, model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
+    project.value.assets.push({ path, method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "自定义画风样张", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt, model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
     draft.refs.push({ id: crypto.randomUUID(), path, source: "自定义 AI 生成", note: "画风样张；提示词保存在素材档案", license: "待确认供应商条款" });
     await ensureImage(path);
     await save();
@@ -428,9 +428,10 @@ export default function useStudio() {
       });
     }
     const cli = results[3].status === "fulfilled" ? results[3].value.data.data : undefined;
-    imageModels.value = imageModels.value.filter((item) => !["codex", "zImage"].includes(item.providerId));
+    imageModels.value = imageModels.value.filter((item) => !["codex", "zImage", "fluxKlein"].includes(item.providerId));
     const localImage = results[4].status === "fulfilled" ? results[4].value.data.data : undefined;
     if (localImage?.installed && localImage.modelReady) imageModels.value.push({ providerId: "zImage", modelId: "turbo4bit", label: "Z-Image Turbo · 本机 MLX", type: "image", configured: true });
+    if (localImage?.fluxKlein?.installed && localImage.fluxKlein.modelReady) imageModels.value.push({ providerId: "fluxKlein", modelId: "klein4bit", label: "FLUX.2 klein · 本机多角色参考", type: "image", configured: true });
     if (cli?.available && cli.loggedIn && cli.imageGeneration) imageModels.value.push({ providerId: "codex", modelId: "imagegen", label: "Codex 内置生图 · 需联网", type: "image", configured: true });
     if (textModel.value && !textModels.value.some((item) => `${item.providerId}/${item.modelId}` === textModel.value)) textModel.value = "";
     if (imageModel.value && !imageModels.value.some((item) => item.configured && `${item.providerId}/${item.modelId}` === imageModel.value)) imageModel.value = "";
@@ -837,14 +838,14 @@ export default function useStudio() {
     if (!model) throw new Error("请在创作设置中配置图片 API，或导出角色提示词交给 Codex 生成后导入");
     const targetDirectory = directory.value;
     if (character.refs.length && character.referenceIntent !== "identity" && (!character.referenceAnalysis || character.analysisFingerprint !== JSON.stringify(character.refs.map((item) => item.path)))) throw new Error("请先分析角色参考图，确认提取的元素与画风后再重新设计；本机不会把原图直接当作新角色");
-    const references = model.providerId === "zImage" ? [] : character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : [])])];
-    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style, model.providerId === "zImage"), references);
+    const references = model.providerId === "zImage" ? [] : character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : [...new Set([...character.refs.map((item) => item.path), ...style.refs.map((item) => item.path)])];
+    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style, ["zImage", "fluxKlein"].includes(model.providerId)), references);
     const path = data.data?.[0]?.path;
     if (data.code !== 200 || !path) throw new Error(data.message || "图片服务没有返回角色图");
     if (directory.value !== targetDirectory) return;
     character.designImages.push({ path, view: character.designView });
     if (!character.image) character.image = path;
-    project.value?.assets.push({ path, method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style, model.providerId === "zImage"), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
+    project.value?.assets.push({ path, method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style, ["zImage", "fluxKlein"].includes(model.providerId)), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
     await ensureImage(path);
     await save();
   }
@@ -886,11 +887,11 @@ export default function useStudio() {
     clearInterval(generationTimer);
     const started = Date.now();
     generationTimer = setInterval(() => { generationProgress.elapsedSeconds = Math.floor((Date.now() - started) / 1000); }, 1000);
-    const response = await axios.post(model.providerId === "zImage" ? "/api/comicStudio/zImage" : model.providerId === "codex" ? "/api/comicStudio/image" : "/api/ai/media/generate", {
+    const response = await axios.post(["zImage", "fluxKlein"].includes(model.providerId) ? "/api/comicStudio/zImage" : model.providerId === "codex" ? "/api/comicStudio/image" : "/api/ai/media/generate", {
       directory: targetDirectory, mediaType: "image", providerId: model.providerId, modelId: model.modelId,
       codexModel: codexModel.value, quality: zImageQuality.value, prompt, ratio: "3:4", outputDirectory: "assets",
       images: references.map((path) => ({ path, mimeType: path.endsWith(".jpg") ? "image/jpeg" : path.endsWith(".webp") ? "image/webp" : "image/png" })),
-    }, { headers: { "x-toonflow-workspace": "1" }, timeout: model.providerId === "zImage" ? 920000 : model.providerId === "codex" ? 500000 : 300000 });
+    }, { headers: { "x-toonflow-workspace": "1" }, timeout: ["zImage", "fluxKlein"].includes(model.providerId) ? 920000 : model.providerId === "codex" ? 500000 : 300000 });
     generationProgress.phase = "保存图片与版本";
     return response;
   }
@@ -902,6 +903,9 @@ export default function useStudio() {
     if (!model?.configured) return "请先选择已配置的生图服务";
     try { current.castSnapshot.filter((item) => panel.characters.includes(item.id)).forEach((item) => matchingCharacter(item, project.value?.characters || [])); } catch (error) { return (error as Error).message; }
     if (panel.characters.some((id) => !current.castSnapshot.some((item) => item.id === id))) return "本格有未绑定角色，请到分镜设计选择角色";
+    if (model.providerId === "fluxKlein") {
+      try { identityPanelInput(current, panel); } catch (error) { return (error as Error).message; }
+    }
 
     if (model.providerId === "zImage") {
 
@@ -925,15 +929,16 @@ export default function useStudio() {
     if (localReference && !panel.image) throw new Error("本地图生图需要本格已有图片；首次出图请选择‘文生图 · 本格动作优先’");
     generationProgress.panelId = panel.id;
     const fingerprint = imageInput(current, panel);
-    const generationPrompt = imagePrompt(current, panel, model.providerId !== "zImage" || localReference, localReference, "", model.providerId === "zImage");
-    const references = model.providerId === "zImage" ? (localReference ? [panel.image] : []) : referencePaths(current, panel);
+    const identityInput = model.providerId === "fluxKlein" ? identityPanelInput(current, panel) : undefined;
+    const generationPrompt = identityInput?.prompt ?? imagePrompt(current, panel, model.providerId !== "zImage" || localReference, localReference, "", model.providerId === "zImage");
+    const references = identityInput?.references ?? (model.providerId === "zImage" ? (localReference ? [panel.image] : []) : referencePaths(current, panel));
     const { data } = await requestImage(model, targetDirectory, generationPrompt, references);
     if (data.code !== 200 || !data.data?.[0]?.path) throw new Error(data.message || "图片服务没有返回可用图片");
     if (directory.value !== targetDirectory) return;
     const generated = data.data[0];
     const path = await adoptImage(panel, generated.path, fingerprint, true);
     const asset = project.value?.assets.find((item) => item.path === path);
-    if (asset) Object.assign(asset, { method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件分镜生成", license: "待按供应商条款确认用途", seed: generated.seed, prompt: generationPrompt, model: `${model.providerId}/${model.modelId}` });
+    if (asset) Object.assign(asset, { method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件分镜生成", license: "待按供应商条款确认用途", seed: generated.seed, prompt: generationPrompt, model: `${model.providerId}/${model.modelId}` });
     await save();
   }
 

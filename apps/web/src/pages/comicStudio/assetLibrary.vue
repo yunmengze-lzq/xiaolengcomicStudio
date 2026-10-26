@@ -1,8 +1,8 @@
 <template>
   <section class="assetLibrary">
     <header><h2>图片素材库</h2><p>当前空间的导入图、参考图、生成结果和历史版本统一保存在：</p><code>{{ directory }}/assets</code><button :disabled="working || disabled" @click="scan">刷新本机文件列表</button><p>删除空间和移入素材回收站均保留本机文件，可恢复，不会释放磁盘空间。仍被角色、画风或漫画引用的图片不能移入回收站。</p></header>
-    <div class="assetFilters"><label for="assetState">查看<select id="assetState" v-model="state"><option value="active">在库素材</option><option value="trash">素材回收站</option></select></label><label for="assetPlatform">来源平台<select id="assetPlatform" v-model="platform"><option value="">全部平台</option><option v-for="name in platforms" :key="name">{{ name }}</option></select></label><label>更新起始日期<input v-model="from" type="date" /></label><label>更新截止日期<input v-model="to" type="date" /></label><label>搜索<input v-model="keyword" placeholder="文件、来源、模型或提示词" /></label></div>
-    <p>{{ visibleRows.length }} 张 · 按最近更新时间排序；未知创建时间不会猜测。</p>
+    <div class="assetFilters"><label for="assetUsage">引用情况<select id="assetUsage" v-model="usageFilter"><option value="all">全部图片</option><option value="unused">未被引用 · 可回收</option><option value="history">仅历史版本 · 保留保护</option><option value="used">当前或设定使用中</option></select></label><label for="assetState">查看<select id="assetState" v-model="state"><option value="active">在库素材</option><option value="trash">素材回收站</option></select></label><label for="assetPlatform">来源平台<select id="assetPlatform" v-model="platform"><option value="">全部平台</option><option v-for="name in platforms" :key="name">{{ name }}</option></select></label><label>更新起始日期<input v-model="from" type="date" /></label><label>更新截止日期<input v-model="to" type="date" /></label><label>搜索<input v-model="keyword" placeholder="文件、来源、模型或提示词" /></label></div>
+    <p>{{ visibleRows.length }} 张 · 按最近更新时间排序；未知创建时间不会猜测。</p><button v-if="state === 'active' && usageFilter === 'unused'" :disabled="disabled || working || !visibleRows.length" @click="recycleUnused">将筛选出的 {{ visibleRows.length }} 张未引用图片移入回收站</button>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="assetCards"><article v-for="row in visibleRows.slice(0, limit)" :key="row.path"><img v-if="imageUrls[row.path] || diskUrls[row.path]" :src="imageUrls[row.path] || diskUrls[row.path]" :alt="`素材 ${row.path}`" loading="lazy" /><div><strong>{{ row.record ? methodLabels[row.record.method] : '来源待补录' }}</strong><small>{{ platformName(row.record) }} · {{ day(row.record?.updatedAt || row.record?.createdAt) || '时间待补录' }}</small><code>{{ row.path }}</code><p>{{ usage.get(row.path)?.join('、') || '当前未被作品引用' }}</p><div class="assetActions"><button :disabled="disabled || working" @click="download(row.path)">下载原图</button><button v-if="state === 'trash'" :disabled="disabled || working" @click="setTrash(row.path, false)">恢复素材</button><button v-else :disabled="disabled || working || usage.has(row.path)" :title="usage.has(row.path) ? '先解除角色、画风或漫画中的引用' : '保留文件，可恢复'" @click="setTrash(row.path, true)">移入回收站</button></div><details><summary>来源、平台与生成记录</summary><template v-if="row.record"><label>来源平台<input v-model="row.record.platform" list="assetPlatforms" maxlength="100" @change="touch(row.record)" /></label><label>生成方式<select v-model="row.record.method" @change="touch(row.record)"><option v-for="(label, value) in methodLabels" :key="value" :value="value">{{ label }}</option></select></label><label>来源或作者<input v-model="row.record.source" maxlength="2000" @change="touch(row.record)" /></label><label>授权依据<input v-model="row.record.license" maxlength="2000" @change="touch(row.record)" /></label><label>模型<input v-model="row.record.model" maxlength="800" @change="touch(row.record)" /></label><label>提示词<textarea v-model="row.record.prompt" rows="4" maxlength="20000" @change="touch(row.record)"></textarea></label><small>创建：{{ row.record.createdAt || '未知' }} · 更新：{{ row.record.updatedAt || '未修改' }}</small></template><button v-else :disabled="disabled" @click="register(row.path); emit('save')">补录来源</button></details></div></article></div>
     <button v-if="visibleRows.length > limit" @click="limit += 50">再显示50张</button>
@@ -18,6 +18,7 @@ const props = defineProps<{ project: ComicProject; directory: string; disabled: 
 const emit = defineEmits<{ save: [] }>();
 type Asset = ComicProject["assets"][number];
 const state = ref("active");
+const usageFilter = ref("all");
 const platform = ref("");
 const from = ref("");
 const to = ref("");
@@ -57,7 +58,10 @@ const platforms = computed(() => [...new Set(rows.value.map((row) => platformNam
 const visibleRows = computed(() => rows.value.filter((row) => {
   const asset = row.record;
   const date = day(asset?.updatedAt || asset?.createdAt);
-  return (state.value === "trash" ? !!asset?.trashedAt : !asset?.trashedAt) && (!platform.value || platformName(asset) === platform.value) && (!from.value || !!date && date >= from.value) && (!to.value || !!date && date <= to.value) && (!keyword.value.trim() || `${row.path} ${asset?.source || ""} ${asset?.model || ""} ${asset?.prompt || ""}`.toLowerCase().includes(keyword.value.trim().toLowerCase()));
+  const labels = usage.value.get(row.path);
+  const historyOnly = !!labels?.length && labels.every((label) => label.startsWith("历史版本："));
+  const matchesUsage = usageFilter.value === "all" || usageFilter.value === "unused" && !labels || usageFilter.value === "history" && historyOnly || usageFilter.value === "used" && !!labels && !historyOnly;
+  return matchesUsage && (state.value === "trash" ? !!asset?.trashedAt : !asset?.trashedAt) && (!platform.value || platformName(asset) === platform.value) && (!from.value || !!date && date >= from.value) && (!to.value || !!date && date <= to.value) && (!keyword.value.trim() || `${row.path} ${asset?.source || ""} ${asset?.model || ""} ${asset?.prompt || ""}`.toLowerCase().includes(keyword.value.trim().toLowerCase()));
 }).sort((a, b) => (b.record?.updatedAt || b.record?.createdAt || "").localeCompare(a.record?.updatedAt || a.record?.createdAt || "")));
 async function scan() { error.value = ""; try { const listing = await useWorkspaceFiles(props.directory).list("assets"); diskPaths.value = listing.entries.filter((item) => item.type === "file" && /^assets\/[a-zA-Z0-9_-]+\.(png|jpg|webp)$/.test(item.path)).map((item) => item.path); } catch { error.value = "素材文件列表读取失败，可重试；已有档案仍保留。"; } }
 onMounted(scan);
@@ -68,6 +72,15 @@ onBeforeUnmount(() => { acquired.forEach((handle) => handle.release()); acquired
 function register(path: string) { let record = props.project.assets.find((item) => item.path === path); if (!record) { record = { path, method: "unknown", source: "", license: "", prompt: "", model: "", createdAt: "" }; props.project.assets.push(record); } return record; }
 function touch(asset: Asset) { asset.updatedAt = new Date().toISOString(); emit("save"); }
 function setTrash(path: string, trash: boolean) { if (trash && usage.value.has(path)) { error.value = "该图片仍被角色、画风或漫画引用，请先解除引用。"; return; } const asset = register(path); asset.trashedAt = trash ? new Date().toISOString() : ""; touch(asset); }
+function recycleUnused() {
+  if (props.disabled || working.value) return;
+  const now = new Date().toISOString();
+  for (const row of visibleRows.value) {
+    if (usage.value.has(row.path)) continue;
+    Object.assign(register(row.path), { trashedAt: now, updatedAt: now });
+  }
+  emit("save");
+}
 async function download(path: string) { working.value = true; error.value = ""; try { const bytes = await useWorkspaceFiles(props.directory).read(path); await saveFile(new Blob([bytes]), path.split("/").at(-1)!); } catch { error.value = "图片读取失败，请检查工作区文件是否仍存在。"; } finally { working.value = false; } }
 </script>
 <style scoped lang="scss">
