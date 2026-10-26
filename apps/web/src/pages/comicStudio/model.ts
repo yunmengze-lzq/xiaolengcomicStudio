@@ -12,7 +12,7 @@ const styleSchema = z.object({
   createdAt: z.string(),
   refs: z.array(referenceSchema).max(30),
 });
-export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody"]).default("sheet") });
+export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody", "turnaround", "expressions"]).default("sheet"), referenceIntent: z.enum(["redesign", "identity", "style"]).default("redesign"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") });
 const topicSchema = z.object({
   id,
   title: z.string().min(1).max(1000),
@@ -112,6 +112,7 @@ export const feedbackSchema = z.object({
   shares: z.number().int().nonnegative().max(1e12).nullable(), note: z.string().max(3000),
 });
 export const assetRecordSchema = z.object({
+  platform: z.string().max(100).optional(), updatedAt: z.string().max(50).optional(), trashedAt: z.string().max(50).optional(), seed: z.number().int().nonnegative().optional(),
   path: assetPath, method: z.enum(["unknown", "upload", "imageApi", "conversation", "codex", "local"]),
   source: z.string().max(2000), license: z.string().max(2000), prompt: text,
   model: z.string().max(800), createdAt: z.string().max(50),
@@ -142,8 +143,8 @@ export const projectSchema = z.object({
   episodes: z.array(episodeSchema).max(500),
   activeEpisodeId: z.string(),
   styleDraft: z
-    .object({ name: z.string().max(100), description: text, avoid: text, refs: z.array(referenceSchema).max(30) })
-    .default({ name: "", description: "", avoid: "", refs: [] }),
+    .object({ name: z.string().max(100), description: text, avoid: text, refs: z.array(referenceSchema).max(30), referenceIntent: z.enum(["redesign", "identity", "style"]).default("style"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") })
+    .default({ name: "", description: "", avoid: "", refs: [], referenceIntent: "style", referenceAnalysis: "", analysisFingerprint: "" }),
 });
 export type ComicProject = z.infer<typeof projectSchema>;
 export type Topic = z.infer<typeof topicSchema>;
@@ -227,7 +228,7 @@ export function imageInput(episode: Episode, panel: Panel) {
     ...(panel.actionSubjectId || panel.actionInstruction || panel.revisionRequest ? { actionSubjectId: panel.actionSubjectId, actionInstruction: panel.actionInstruction, revisionRequest: panel.revisionRequest } : {}),
     characters: panel.characters,
     style: episode.styleSnapshot,
-    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, ...identity }) => ({ ...identity, ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
+    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, referenceIntent, referenceAnalysis, analysisFingerprint, ...identity }) => ({ ...identity, ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
     ...(previous?.image ? { previousImage: previous.image } : !previous && episode.continuityImage ? { previousImage: episode.continuityImage } : {}),
   });
 }
@@ -267,11 +268,16 @@ export function splitDialogue(panel: Panel, cast: Character[]): Speech[] {
 }
 
 export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">) {
-  const views = { sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
-  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. Character reference images guide identity, silhouette and signature features; style references guide rendering. Reinterpret the character in the requested art direction rather than copying the reference picture.\nName: ${character.name}\nUser's everyday description: ${character.description || "Use the attached character references to preserve recognizable features."}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep recognizable hairstyle, face shape, outfit colours and distinctive accessories consistent. Do not add unrelated characters.`;
+  const views = { turnaround: "One character turnaround sheet with full-body front, side and back views of exactly the same character and outfit.", expressions: "One expression reference sheet: the same character face in six expressions (neutral, happy, surprised, worried, angry, sleepy), stable hairstyle and facial features.", sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
+  const intent = { redesign: "Extract distinctive elements AND the visual style, then design a NEW original character. For a logo, object or animal, reinterpret its colours, silhouette and motifs into the requested person or mascot. Do NOT reproduce the input image, layout, collage or original pose.", identity: "Preserve the referenced character identity and outfit; create the requested new views or pose rather than duplicating the original image.", style: "Use ONLY linework, palette, shading and proportions from the reference; invent a new identity from the user's description. Do not copy the original character or composition." };
+  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nReviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
 }
 
-export function imagePrompt(episode: Episode, panel: Panel, useReferences = true, referenceIsCurrent = false) {
+export function referenceReady(target: { refs: { path: string }[]; referenceIntent: string; referenceAnalysis: string; analysisFingerprint: string }) {
+  return !target.refs.length || target.referenceIntent === "identity" || !!target.referenceAnalysis.trim() && target.analysisFingerprint === JSON.stringify(target.refs.map((item) => item.path));
+}
+
+export function imagePrompt(episode: Episode, panel: Panel, useReferences = true, referenceIsCurrent = false, referenceOverride = "") {
   const cast = episode.castSnapshot.filter((item) => panel.characters.includes(item.id));
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
   return [
@@ -283,21 +289,22 @@ export function imagePrompt(episode: Episode, panel: Panel, useReferences = true
     ...(panel.revisionRequest ? [`CORRECTION REQUIRED: ${panel.revisionRequest}. Keep all other named identities, costumes and intended story unchanged.`] : []),
     `Style: ${episode.styleSnapshot?.description || "Use the supplied art direction"}`,
     `Avoid: ${episode.styleSnapshot?.avoid || ""}`,
-    ...(useReferences ? [referenceIsCurrent ? "The only reference is the OLD VERSION OF THIS PANEL. Preserve its art direction and identities, but replace the incorrect action according to the current subject–action contract. Do not preserve action mistakes or duplicated characters." : "References: style images guide linework and colour; character sheets guide identity. Reference images are not the new action. Follow the current subject–action contract even when the previous frame shows a different pose."] : ["No reference image is supplied. Draw the current action from this description; do not reconstruct a preceding frame."]),
-    ...(useReferences && !referenceIsCurrent && !previous && episode.continuityImage ? ["The last reference is the previous episode ending. Preserve character identity and art style, while following the new episode action and location."] : []),
-    ...(useReferences && !referenceIsCurrent && previous?.image
+    ...(referenceOverride ? [referenceOverride] : useReferences ? [referenceIsCurrent ? "The only reference is the OLD VERSION OF THIS PANEL. Preserve its art direction and identities, but replace the incorrect action according to the current subject–action contract. Do not preserve action mistakes or duplicated characters." : "References: style images guide linework and colour; character sheets guide identity. Reference images are not the new action. Follow the current subject–action contract even when the previous frame shows a different pose."] : ["No reference image is supplied. Draw the current action from this description; do not reconstruct a preceding frame."]),
+    ...(useReferences && !referenceIsCurrent && !referenceOverride && !previous && episode.continuityImage ? ["The last reference is the previous episode ending. Preserve character identity and art style, while following the new episode action and location."] : []),
+    ...(useReferences && !referenceIsCurrent && !referenceOverride && previous?.image
       ? [
           "The last reference is the preceding panel. Preserve scene continuity, props, clothing and left-right relationships unless the action explicitly changes them. Draw only the new scene.",
         ]
       : []),
+    ...(useReferences && !referenceIsCurrent && !referenceOverride ? [`Reference order: ${referencePaths(episode, panel).map((path, index) => { const character = cast.find((item) => item.image === path); return `${index + 1}: ${character ? `IDENTITY reference for ${character.name}; preserve face, hair, outfit and species, but render the current action` : episode.styleSnapshot?.refs.some((item) => item.path === path) ? "STYLE ONLY; use rendering, not the depicted character or composition" : "previous scene for continuity only; never copy its pose"}`; }).join("; ")}. Role identity references take priority over style and previous-frame people. Each named character appears once in the requested pose.`] : []),
   ].join("\n\n");
 }
 
 export function referencePaths(episode: Episode, panel: Panel) {
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
   return [...new Set([
-    ...(episode.styleSnapshot?.refs.map((item) => item.path) ?? []),
     ...episode.castSnapshot.filter((item) => panel.characters.includes(item.id) && item.image).map((item) => item.image),
+    ...(episode.styleSnapshot?.refs.map((item) => item.path) ?? []),
     ...(previous?.image ? [previous.image] : !previous && episode.continuityImage ? [episode.continuityImage] : []),
   ])];
 }

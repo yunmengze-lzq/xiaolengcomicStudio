@@ -3,12 +3,12 @@
     <div class="itemList">
       <el-card v-for="item in sortedProviders" :key="item.fileName" class="providerItem" shadow="never">
         <div class="providerHeader">
-          <div v-if="item.icon || (!comicStudio && item.id.toLowerCase() === 'tfrouter')" class="providerMark" aria-hidden="true">
+          <div v-if="(!comicStudio || item.id.toLowerCase() !== 'tfrouter') && (item.icon || item.id.toLowerCase() === 'tfrouter')" class="providerMark" aria-hidden="true">
             <img class="providerLogo" :class="{ monochrome: item.id.toLowerCase() === 'tfrouter' }" :src="item.icon || logoUrl" alt="" />
           </div>
           <div class="providerInfo">
             <div class="providerHeading">
-              <el-text class="providerName" tag="strong">{{ item.label }}</el-text>
+              <el-text class="providerName" tag="strong">{{ comicStudio && item.id.toLowerCase() === 'tfrouter' ? '已配置的兼容图片服务' : item.label }}</el-text>
               <el-tag v-if="!comicStudio && item.id.toLowerCase() === 'tfrouter'" size="small">官方</el-tag>
             </div>
             <el-text class="providerId" size="small" type="info" :title="item.fileName">{{ item.fileName }}</el-text>

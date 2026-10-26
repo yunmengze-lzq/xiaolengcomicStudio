@@ -16,6 +16,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
   u.mcpControl.assertAppRequest(req);
   if (!u.workspace.isLocalWorkspaceRequest(req)) throw Object.assign(new Error("仅允许本机运行本地生图"), { status: 403 });
   const input = inputSchema.parse(req.body);
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0]! >>> 1;
   const size = { draft: { width: 384, height: 512 }, standard: { width: 768, height: 1024 }, detail: { width: 896, height: 1152 } }[input.quality];
   const directory = await u.workspace.resolveWorkspace(req, input.directory);
   if (running) throw Object.assign(new Error("本地模型正在生成，请等待当前任务完成"), { status: 409 });
@@ -37,7 +38,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
     const reference = input.images[0] ? (await resolveWorkspacePath(directory, input.images[0].path)).path : "";
     const started = Date.now();
     await new Promise<void>((done, reject) => {
-      const child = spawn(runtime.binary, ["--model", "filipstrand/Z-Image-Turbo-mflux-4bit", "--prompt-file", promptFile, "--width", String(size.width), "--height", String(size.height), "--steps", "9", "--seed", "42", "--low-ram", "--mlx-cache-limit-gb", "2", "--output", output, "--no-exif", ...(reference ? ["--image-path", reference, "--image-strength", "0.65"] : [])], {
+      const child = spawn(runtime.binary, ["--model", "filipstrand/Z-Image-Turbo-mflux-4bit", "--prompt-file", promptFile, "--width", String(size.width), "--height", String(size.height), "--steps", "9", "--seed", String(seed), "--low-ram", "--mlx-cache-limit-gb", "2", "--output", output, "--no-exif", ...(reference ? ["--image-path", reference, "--image-strength", "0.35"] : [])], {
         shell: false, signal: controller.signal, timeout: 900000, stdio: ["ignore", "ignore", "pipe"],
         env: { ...process.env, HF_HOME: resolve(runtime.root, "cache"), HF_HUB_OFFLINE: "1", HF_HUB_DISABLE_IMPLICIT_TOKEN: "1", MPLCONFIGDIR: resolve(runtime.root, "matplotlib"), TOKENIZERS_PARALLELISM: "false" },
       });
@@ -53,6 +54,6 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
     const path = `assets/zImage${crypto.randomUUID().replaceAll("-", "")}.png`;
     await writeFile((await resolveWorkspacePath(directory, path)).path, bytes, { mode: 0o600, flag: "wx" });
     console.info("[comicLocalImage]", { model: "z-image-turbo-4bit", quality: input.quality, ...size, steps: 9, elapsedMs: Date.now() - started });
-    res.json(success([{ path, mimeType: "image/png" }]));
+    res.json(success([{ path, mimeType: "image/png", seed }]));
   } finally { running = false; res.off("close", cancel); req.off("aborted", cancel); }
 });

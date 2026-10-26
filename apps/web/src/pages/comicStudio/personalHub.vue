@@ -22,8 +22,7 @@
         <article v-for="entry in [...project.journal].reverse()" :key="entry.id" class="hubCard journalEntry"><small>{{ formatTime(entry.at) }}</small><h3>{{ entry.action }}</h3><p>{{ entry.reason || '本次未填写修改理由' }}</p><div class="tagList"><span v-for="section in entry.sections" :key="section">{{ sectionNames[section] || section }}</span></div><button class="textButton" @click="inspectRevision(entry.path)">展开修改前后</button><div v-if="revisionPath === entry.path" class="revisionView"><p v-if="revisionError" role="alert">{{ revisionError }}</p><article v-for="side in revisionSides" :key="side.label"><h4>{{ side.label }}</h4><pre class="revisionSummary">{{ side.summary }}</pre><div v-for="work in side.episodes" :key="work.id"><strong>{{ work.title }}</strong><p>{{ work.story }}</p><div v-for="panel in work.panels" :key="panel.id"><img v-if="panel.image && imageUrls[panel.image]" :src="imageUrls[panel.image]" :alt="panel.shot" /><p>{{ panel.action }}</p><p>{{ panel.dialogue }}</p></div></div><details><summary>查看完整快照数据</summary><pre>{{ side.json }}</pre></details></article></div></article>
       </template>
       <template v-else>
-        <section class="hubCard"><h2>图片来源与生成记录</h2><p>工作区：<code>{{ directory }}/assets</code></p><p>「对话生成后导入」与「软件图片 API」是两条路径。原生对话出图不会被软件自动调用。历史图片未补录来源时显示「待补录」。</p></section>
-        <article v-for="asset in assetRows" :key="asset.path" class="hubCard assetRow"><img v-if="imageUrls[asset.path]" :src="imageUrls[asset.path]" :alt="asset.path" /><div><strong>{{ asset.path }}</strong><template v-if="asset.record"><label>生成方式<select v-model="asset.record.method"><option value="unknown">待补录</option><option value="upload">本地导入</option><option value="conversation">对话生成后导入</option><option value="imageApi">软件图片 API</option></select></label><label>来源与作者<input v-model="asset.record.source" maxlength="2000" /></label><label>授权依据与允许用途<input v-model="asset.record.license" maxlength="2000" /></label><label>模型<input v-model="asset.record.model" maxlength="800" /></label><label>生成提示词<textarea v-model="asset.record.prompt" rows="3" maxlength="20000" /></label><button class="secondaryButton" @click="emit('save')">保存素材档案</button></template><template v-else><p>历史图片 · 来源待补录</p><button class="secondaryButton" @click="registerAsset(asset.path)">补录来源</button></template></div></article>
+        <assetLibrary :project="project" :directory="directory" :disabled="disabled" :imageUrls="imageUrls" @save="emit('save')" />
       </template>
     </fieldset>
   </section>
@@ -34,6 +33,7 @@ import { feedbackSchema, projectSchema } from "./model";
 import type { ComicProject } from "./model";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import saveFile from "@/lib/saveFile";
+import assetLibrary from "./assetLibrary.vue";
 import { zipSync, strToU8 } from "fflate";
 import { keywordInsights } from "./creatorInsights";
 const props = defineProps<{ section?: string; archiveOnly?: boolean; project: ComicProject; directory: string; disabled: boolean; canAnalyze: boolean; imageUrls: Record<string, string> }>();
@@ -95,11 +95,6 @@ async function inspectRevision(path: string) {
     if (directory === props.directory && path === revisionPath.value) revisionSides.value = sides;
   } catch (error) { revisionError.value = error instanceof Error ? error.message : "快照读取失败"; }
 }
-const assetRows = computed(() => {
-  const paths = new Set([...props.project.assets.map((item) => item.path), ...props.project.styles.flatMap((style) => style.refs.map((item) => item.path)), ...props.project.characters.map((item) => item.image), ...props.project.episodes.flatMap((episode) => [...episode.panels.flatMap((item) => [item.image, ...item.history]), ...episode.castSnapshot.map((item) => item.image)])].filter(Boolean));
-  return [...paths].map((path) => ({ path, record: props.project.assets.find((item) => item.path === path) }));
-});
-function registerAsset(path: string) { props.project.assets.push({ path, method: "unknown", source: "", license: "", prompt: "", model: "", createdAt: "" }); }
 async function exportArchive() {
   archiveError.value = "";
   const snapshot = JSON.parse(JSON.stringify(props.project)) as ComicProject;

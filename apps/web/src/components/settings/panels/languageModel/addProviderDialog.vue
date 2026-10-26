@@ -3,7 +3,7 @@
     <div class="providerPicker">
       <aside class="providerSidebar" aria-label="选择厂商">
         <button
-          v-for="item in languageProviders"
+          v-for="item in availableProviders"
           :key="item.id"
           class="providerItem"
           type="button"
@@ -63,7 +63,8 @@ import { saveSettings, type CustomProviderModel } from "@/stores/settings";
 import { isTfRouterProvider } from "@/lib/tf";
 
 const visible = defineModel<boolean>({ default: false });
-const selectedProvider = ref<string>(languageProviders[0]?.id ?? "");
+const availableProviders = computed(() => languageProviders.filter((item) => !comicStudio || item.id !== "tfRouter"));
+const selectedProvider = ref<string>(availableProviders.value[0]?.id ?? "");
 const formApi = shallowRef<Api>();
 const formValues = ref<Record<string, unknown>>({});
 const models = shallowRef<CustomProviderModel[]>([]);
@@ -132,7 +133,7 @@ watch(
 );
 
 function resetForm() {
-  selectedProvider.value = languageProviders[0]?.id ?? "";
+  selectedProvider.value = availableProviders.value[0]?.id ?? "";
   formError.value = "";
   formApi.value = undefined;
   formValues.value = {};

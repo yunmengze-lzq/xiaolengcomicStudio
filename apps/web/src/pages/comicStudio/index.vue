@@ -10,7 +10,7 @@
       </a>
       <button class="sidebarCollapse" :aria-expanded="!sidebarCollapsed" :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="sidebarCollapsed = !sidebarCollapsed"><icon-layout-sidebar-left-collapse v-if="!sidebarCollapsed" :size="19" /><icon-layout-sidebar-left-expand v-else :size="19" /></button></div>
       <div v-if="!sidebarCollapsed" class="projectSwitch">
-        <label for="projectSelect">创作空间</label>
+        <div class="spaceHeading"><label for="projectSelect">创作空间</label><button class="spaceManage" :disabled="!!busy || saving" aria-label="管理创作空间" title="改名、删除与恢复空间" @click="spaceName = project?.title || ''; spaceManageVisible = true">⋯</button></div>
         <select id="projectSelect" :value="directory" :disabled="!!busy || saving" @change="switchProject">
           <option value="">选择创作空间</option>
           <option v-for="item in comicProjects" :key="item.directory" :value="item.directory">{{ item.name }}</option>
@@ -19,7 +19,6 @@
           <icon-plus :size="16" />
           新建空间
         </button>
-        <button class="newProject" :disabled="!!busy || saving" @click="spaceName = project?.title || ''; spaceManageVisible = true">管理空间 · 改名 / 删除</button>
       </div>
       <nav class="sidebarTree" aria-label="功能导航">
         <section class="navGroup">
@@ -85,7 +84,7 @@
         </div>
       </header>
 
-      <main class="studioContent" :aria-busy="!!busy">
+      <main ref="studioContent" class="studioContent" :aria-busy="!!busy">
         <div v-if="lastError" class="previewWarning" role="alert">操作未完成：{{ lastError }}<button class="textButton" @click="lastError = ''">收起提示</button></div>
           <details v-if="project && workspaceMode !== 'analysis'" class="changeNote"><summary>修改说明与记录<span>{{ changeReason ? ' · 已填写' : ' · 选填' }}</span></summary><div class="changeReason"><label for="changeReason">这次为什么修改</label><input id="changeReason" v-model="changeReason" :disabled="!!busy || saving" maxlength="3000" placeholder="选填；下次保存时与前后快照一起留存" /><button class="textButton" @click="workspaceMode = 'archive'">查看修改记录</button></div></details>
         <section v-if="!project" class="welcomePanel">
@@ -134,9 +133,9 @@
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
           <fieldset class="stageFields" :disabled="!!busy || saving">
             <section v-if="stage === 0" class="topicsStage">
-              <div class="surface creationStart"><strong>从这里开始创作</strong><div class="panelActions"><button class="primaryButton" @click="ideaMode = 'ownStory'">我有剧情，直接导入</button><button class="secondaryButton" @click="stage = 3">先做角色与画风</button></div><p class="helperText">{{ activeStyle ? `当前画风：${activeStyle.name}` : '尚未选择画风，可先去角色与美术设置' }} · 角色库 {{ project.characters.length }} 位。可先选设定，也可以先写故事。</p></div>
-              <div v-if="ideaMode === 'ownStory'" class="surface"><h2>把自己的剧情变成漫画</h2><label for="ownStory">粘贴剧情或导入文字文件</label><textarea id="ownStory" v-model="originalStory" rows="10" maxlength="10000" placeholder="直接粘贴自己的故事、对话或已写好的分镜，不用先选热点。"></textarea><label class="secondaryButton uploadButton" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload">导入 TXT / Markdown<input type="file" accept=".txt,.md,text/plain,text/markdown" @change="importStory" /></label><label for="ownCastMode">角色方式</label><select id="ownCastMode" v-model="originalCastMode"><option value="new">根据剧情建立新角色</option><option value="fixed" :disabled="!project.characters.length">使用固定角色</option></select><div v-if="originalCastMode === 'fixed'" class="inlineFields"><label v-for="character in project.characters" :key="character.id" class="checkLabel"><input v-model="originalCharacterIds" type="checkbox" :value="character.id" />{{ character.name }}</label></div><button class="primaryButton" :disabled="!originalStory.trim() || (originalCastMode === 'fixed' && !originalCharacterIds.length)" @click="run('保存自带剧情', () => startFromStory(originalStory, originalCastMode === 'fixed', originalCastMode === 'fixed' ? originalCharacterIds : undefined))">保存剧情，进入脚本与分镜</button><p class="helperText">这里只保存，不调用模型。下一步可继续编辑，按需拆成分镜。</p></div>
+              <div class="creationSummary"><span>{{ activeStyle ? `画风：${activeStyle.name}` : '尚未选择画风' }} · 角色 {{ project.characters.length }} 位</span><button class="secondaryButton" @click="stage = 3">选择角色与画风</button></div>
               <div class="ideaModes" aria-label="创作起点"><button v-for="item in [{ id: 'ownStory', label: '我的剧情' }, { id: 'hot', label: '发现热点' }, { id: 'research', label: '专题研究' }, { id: 'series', label: '原创与连载' }]" :key="item.id" :class="{ selected: ideaMode === item.id }" :aria-pressed="ideaMode === item.id" @click="ideaMode = item.id">{{ item.label }}</button></div>
+              <div v-if="ideaMode === 'ownStory'" class="surface"><h2>把自己的剧情变成漫画</h2><label for="ownStory">粘贴剧情或导入文字文件</label><textarea id="ownStory" v-model="originalStory" rows="10" maxlength="10000" placeholder="直接粘贴自己的故事、对话或已写好的分镜，不用先选热点。"></textarea><label class="secondaryButton uploadButton" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload">导入 TXT / Markdown<input type="file" accept=".txt,.md,text/plain,text/markdown" @change="importStory" /></label><label for="ownCastMode">角色方式</label><select id="ownCastMode" v-model="originalCastMode"><option value="new">根据剧情建立新角色</option><option value="fixed" :disabled="!project.characters.length">使用固定角色</option></select><div v-if="originalCastMode === 'fixed'" class="inlineFields"><label v-for="character in project.characters" :key="character.id" class="checkLabel"><input v-model="originalCharacterIds" type="checkbox" :value="character.id" />{{ character.name }}</label></div><button class="primaryButton" :disabled="!originalStory.trim() || (originalCastMode === 'fixed' && !originalCharacterIds.length)" @click="run('保存自带剧情', () => startFromStory(originalStory, originalCastMode === 'fixed', originalCastMode === 'fixed' ? originalCharacterIds : undefined))">保存剧情，进入脚本与分镜</button><p class="helperText">这里只保存，不调用模型。下一步可继续编辑，按需拆成分镜。</p></div>
               <div v-if="ideaMode === 'series'" class="surface"><h2>创作新漫画</h2><p class="helperText">先建立角色、保存设定图，再选这些角色写故事；下一集会继承角色快照。</p><button class="secondaryButton" @click="stage = 3">先创建固定角色</button><label for="studioOriginal">生活观察或关键词</label><input id="studioOriginal" v-model="originalDirection" maxlength="3500" placeholder="例如：下班后只想安静的 I 人，和热情的同事" /><label for="originalCastMode">角色方式</label><select id="originalCastMode" v-model="originalCastMode"><option value="new">先创作故事，AI 建立新角色</option><option value="fixed" :disabled="!project.characters.length">使用固定角色库 · {{ project.characters.length }} 位</option></select><div v-if="originalCastMode === 'fixed'" class="inlineFields"><label v-for="character in project.characters" :key="character.id" class="checkLabel"><input v-model="originalCharacterIds" type="checkbox" :value="character.id" />{{ character.name }}</label></div><button class="primaryButton" :disabled="!originalDirection.trim() || (originalCastMode === 'fixed' && !originalCharacterIds.length)" @click="run('创建原创选题', () => startOriginal(originalDirection, originalCastMode === 'fixed', originalCastMode === 'fixed' ? originalCharacterIds : undefined))">{{ originalCastMode === 'fixed' ? '使用所选角色开始创作' : '先写故事，建立角色' }}</button></div>
               <seriesDesk v-if="ideaMode === 'series'" :project="project" :disabled="!!busy || saving" @save="run('保存连载设定', save)" @select="(id) => run('切换连载作品', async () => { project!.activeEpisodeId = id; await save(); })" @next="(direction) => run('创建下一集', () => startNextEpisode(direction))" />
               <researchDesk v-if="ideaMode === 'research'" v-model:keyword="researchKeyword" :project="project" :disabled="!!busy || saving" :status="researchStatus" @collect="(keyword, platforms) => run('多平台收集专题素材', () => collectResearch(keyword, platforms))" @save="run('保存研究笔记', save)" @use="(id) => run('采用专题素材包', () => useResearchPack(id))" @detail="(packId, topicId) => run('读取笔记正文', () => readResearchSource(packId, topicId))" />
@@ -367,9 +366,10 @@
             </section>
 
             <section v-else-if="stage === 3" class="assetsStage">
+              <div class="surface"><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">当前文本模型 · 必须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></div>
               <div class="surface">
                 <div class="sectionTitle"><h2>先选一种画风</h2><span>6 类风格 · 可继续修改</span></div>
-                <p class="helperText">点击卡片即可保存并应用到本期，之后可在下方自定义新版本。样张由本次对话原创生成，展示真实线条、材质与光影；不是角色身份参考，实际效果取决于模型。</p>
+                <p class="helperText">点击卡片即可保存并应用到本期，之后可在下方自定义新版本。这些是预设展示样张，不是本次为你生成的图片。选择只载入画风设置；参考原图、分析结果与生成成品会分别标明。</p>
                 <div class="presetGrid">
                   <article v-for="preset in stylePresets" :key="preset.id" class="presetCard">
                     <button :aria-label="`选择${preset.name}画风`" @click="applyPreset(preset)">
@@ -411,15 +411,16 @@
                     </div>
                   </div>
                   <label for="styleDescription">你希望是什么感觉？</label>
+                  <label for="styleReferenceIntent">参考图怎么用？</label><select id="styleReferenceIntent" v-model="styleDraft.referenceIntent"><option value="redesign">提取元素重新设计 · 新人物与新构图</option><option value="identity">保持角色 · 换画风或镜头</option><option value="style">只参考画风 · 不复制原人物</option></select>
                   <textarea
                     id="styleDescription"
                     v-model="styleDraft.description"
                     rows="3"
                     placeholder="例如：像参考图一样的二次元画风，蓝白配色，人物更可爱一些；也可以只上传参考图。"></textarea>
-                  <label>风格参考图片</label>
+                  <label>风格参考图片</label><label>复用素材库图片<select @change="reuseReference($event, styleDraft.refs, 30)"><option value="">从本空间素材库选择，不重复保存文件</option><option v-for="asset in project.assets.filter((item) => !item.trashedAt)" :key="asset.path" :value="asset.path">{{ asset.source || '本机图片' }} · {{ asset.path }}</option></select></label>
                   <div class="referenceGrid">
                     <figure v-for="reference in styleDraft.refs" :key="reference.id">
-                      <img :src="imageUrls[reference.path]" alt="待加入风格版本的参考图" />
+                      <img :src="imageUrls[reference.path]" alt="风格参考图片" /><figcaption>{{ reference.source === '自定义 AI 生成' ? '已生成样张 · 可复用' : '参考原图 · 不是生成结果' }}</figcaption>
                       <input v-model="reference.source" aria-label="参考图来源" placeholder="来源链接或作者" />
                       <input v-model="reference.license" aria-label="参考图授权" placeholder="授权依据与允许用途" />
                       <input v-model="reference.note" aria-label="参考图特点" placeholder="希望参考的具体特点" />
@@ -436,8 +437,9 @@
                       <input type="file" accept="image/png,image/jpeg,image/webp" multiple @change="addStyleReferences" />
                     </label>
                   </div>
-                  <button class="secondaryButton" :disabled="!imageModel" @click="run('生成自定义画风样张', generateStylePreview)">根据描述与参考图生成画风样张</button>
-                  <p class="helperText">点击才调用生图服务。参考图会实际传给模型；本机 Z-Image 最多一张，多图请选支持多参考图的服务。</p>
+                  <button class="secondaryButton" :disabled="!styleDraft.refs.length" @click="run('分析画风参考图', () => analyzeReferences(styleDraft, 'style'))">先分析参考图 · 使用文本模型识图</button><label for="styleAnalysis">提取的元素与画风 · 可修改</label><textarea id="styleAnalysis" v-model="styleDraft.referenceAnalysis" rows="4" maxlength="3000" placeholder="点击分析后显示提取结果；确认后再生成。"></textarea>
+                  <button class="secondaryButton" :disabled="!imageModel || !referenceReady(styleDraft)" @click="run('生成自定义画风样张', generateStylePreview)">根据描述与参考图生成画风样张</button>
+                  <p class="helperText">分析需支持识图的文本模型或 Codex，点击才调用。Z-Image 重新设计和纯画风模式使用分析文字文生图，避免沿用原图构图；保持角色模式才用普通图生图，效果仍需审核。</p>
                   <button class="primaryButton" @click="run('保存新美术版本', publishDraft)">
                     <icon-stack-2 :size="16" />
                     保存为新版本
@@ -453,37 +455,30 @@
                   </button>
                 </div>
                 <p class="helperText">首次生成脚本会自动建立固定角色并关联分镜；这里可以调整外形、生成设定图。已有角色会在后续创作中复用。多角色可同框，仍需审稿检查一致性。</p>
-                <label for="characterImageModel">角色出图服务</label>
-                <select id="characterImageModel" v-model="imageModel"><option value="">请选择生图服务</option><option v-for="model in imageModels.filter((item) => item.configured)" :disabled="!model.configured" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select>
-                <button class="textButton" @click="openSettings('mediaModel')">配置生图服务</button>
                 <div class="characterGrid">
                   <article v-for="character in project.characters" :key="character.id" class="characterCard">
-                    <label
-                      class="characterImage"
-                      tabindex="0"
-                      role="button"
-                      @keydown.enter.prevent="activateUpload"
-                      @keydown.space.prevent="activateUpload">
+                    <div class="characterImage">
                       <img v-if="character.image" :src="imageUrls[character.image]" :alt="`${character.name}角色设定`" />
                       <span v-else>
                         <icon-user-square-rounded :size="32" />
-                        导入角色设定图
+                        尚无生成结果 · 先添加下方参考图
                       </span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        :aria-label="`上传${character.name}设定图`"
-                        @change="uploadCharacter($event, character)" />
-                    </label>
+                    </div>
+                    <details><summary>已有完成的角色图？直接导入成品</summary><label class="secondaryButton uploadButton" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload">导入成品 · 不调用模型<input type="file" accept="image/png,image/jpeg,image/webp" :aria-label="`上传${character.name}设定图`" @change="uploadCharacter($event, character)" /></label></details>
+                    <p class="helperText">{{ character.image ? (project.assets.find((item) => item.path === character.image)?.method === 'upload' ? '这是直接导入的成品原图。要重新设计，请添加下方参考图后分析生成。' : '已生成的角色成品图') : '尚无角色成品；下方添加参考图并分析，才会生成新角色。' }}</p>
+                    <button v-if="character.image && !character.refs.some((item) => item.path === character.image)" class="secondaryButton" @click="run('将已有图用作参考', async () => { if (character.refs.length >= 12) throw new Error('请先移除不需要的参考图'); character.refs.push({ id: newTopicId(), path: character.image, source: '已有角色图', note: '提取元素与画风，按新要求设计角色', license: '' }); await save(); })">将上图作为设计参考 · 不重复保存文件</button>
                     <label :for="character.id">角色名称</label>
                     <input :id="character.id" v-model="character.name" maxlength="100" />
                     <label :for="`${character.id}Description`">用自己的话描述想要的角色</label>
+                    <label :for="`${character.id}Intent`">参考图怎么用？</label><select :id="`${character.id}Intent`" v-model="character.referenceIntent"><option value="redesign">提取元素与画风 · 重新设计我的角色</option><option value="identity">保持角色 · 新动作与新视角</option><option value="style">只参考画风 · 新角色身份</option></select>
                     <textarea :id="`${character.id}Description`" v-model="character.description" rows="4" placeholder="例如：想做一个蓝白配色、长发、聪明温柔的 DeepSeek 娘；保留参考图发型，衣服更日常。不需要懂绘画术语。"></textarea>
                     <label :for="`${character.id}Art`">想要的画风</label><select :id="`${character.id}Art`" v-model="character.artDirection"><option value="">跟随当前默认画风</option><option value="原创二次元动漫人物，清晰线条、柔和配色、稳定五官与服装细节">二次元动漫</option><option value="原创Q版可爱人物，圆润比例、清晰轮廓、明快配色">Q版可爱</option><option value="原创水彩绘本，柔和纸纹和浅色晕染，人物特征清晰">柔和绘本</option></select>
-                    <label :for="`${character.id}View`">这次生成什么？</label><select :id="`${character.id}View`" v-model="character.designView"><option value="sheet">角色设定图 · 正面、侧面和脸部特写</option><option value="fullBody">全身立绘 · 看清服装与造型</option><option value="portrait">头像 · 看清脸部特征</option></select>
+                    <label :for="`${character.id}View`">这次生成什么？</label><select :id="`${character.id}View`" v-model="character.designView"><option value="sheet">角色设定图 · 正面、侧面和脸部特写</option><option value="turnaround">角色三视图 · 正面、侧面、背面</option><option value="expressions">表情参考图 · 六种表情</option><option value="fullBody">全身立绘 · 看清服装与造型</option><option value="portrait">头像 · 看清脸部特征</option></select>
+                    <label>复用素材库图片<select @change="reuseReference($event, character.refs)"><option value="">从本空间素材库选择，不重复保存文件</option><option v-for="asset in project.assets.filter((item) => !item.trashedAt)" :key="asset.path" :value="asset.path">{{ asset.source || '本机图片' }} · {{ asset.path }}</option></select></label>
                     <div class="referenceGrid"><figure v-for="reference in character.refs" :key="reference.id"><img :src="imageUrls[reference.path]" :alt="`${character.name}的生成参考图`" /><input v-model="reference.note" aria-label="角色参考图特点" placeholder="想保留什么？如发型、衣服、配色" /><input v-model="reference.source" aria-label="角色参考图来源" placeholder="来源或作者（自己审核用）" /><button class="textButton" @click="character.refs = character.refs.filter((item) => item.id !== reference.id)">移除此参考</button></figure><label class="uploadTile" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload"><icon-photo-plus :size="24" /><span>添加生成参考图</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple :aria-label="`添加${character.name}参考图`" @change="addCharacterReferences($event, character)" /></label></div>
-                    <p class="helperText">参考图用于下次生成；上方大图是正式设定图。软件会整理提示词，无须专业术语。{{ imageModel === 'zImage/turbo4bit' ? '本机 Z-Image 最多一张参考图；多图或复杂换画风请选多参考图服务。' : '' }}</p>
-                    <div class="panelActions"><button class="primaryButton" :disabled="!imageModel" @click="run('生成角色设定图', () => generateCharacter(character))">生成角色设定图</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div>
+                    <button class="secondaryButton" :disabled="!character.refs.length" @click="run('分析角色参考图', () => analyzeReferences(character, 'character'))">先分析参考图 · 使用文本模型识图</button><label :for="`${character.id}Analysis`">图片提取与角色设计说明 · 可修改</label><textarea :id="`${character.id}Analysis`" v-model="character.referenceAnalysis" rows="4" maxlength="3000" placeholder="分析后先检查保留元素、画风和新的角色设计，再生成。"></textarea>
+                    <p class="helperText">参考原图不会自动变成生成结果。重新设计需先分析；分析和生图分别调用模型。Z-Image 重新设计使用提取的文字文生图，保持角色才用单图参考。</p>
+                    <div class="panelActions"><button class="primaryButton" :disabled="!imageModel || !referenceReady(character)" @click="run('生成角色设定图', () => generateCharacter(character))">生成角色设定图</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div>
                   </article>
                 </div>
               </div>
@@ -509,7 +504,7 @@
                       {{ model.label }}
                     </option>
                   </select>
-                  <template v-if="imageModel === 'zImage/turbo4bit'"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">文生图 · 本格动作优先</option><option value="reference">单图参考 · 延续画面</option></select></template>
+                  <template v-if="imageModel === 'zImage/turbo4bit'"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">文生图 · 本格动作优先</option><option value="character">固定角色参考 · 单角色新动作</option><option value="reference">参考本格旧图 · 修订画面</option></select></template>
                   <button class="secondaryButton" @click="openSettings('comicDefaults')">配置服务</button>
                   <button class="primaryButton" :disabled="!imageModel" @click="run('连续生成待出图', generateMissingPanels)">连续生成待出图</button>
                 </div>
@@ -519,7 +514,7 @@
                 </button>
               </div>
               <p class="helperText">
-                <template v-if="imageModel === 'zImage/turbo4bit'">本地文生图使用本期画风、角色文字与本格动作；单图参考方式仅以本格旧图重画，可能继承旧图的动作错误。两种方式都不能保证角色身份锁定。画质档位提高细节，动作准确性仍需审稿。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
+                <template v-if="imageModel === 'zImage/turbo4bit'">本地文生图只用文字；固定角色参考模式会传入一位角色的正式设定图，并按本格动作重画。参考旧图模式可能继承旧姿势。Z-Image 不保证身份锁定，多角色同框请选多参考图片API或ComfyUI工作流。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
               </p>
               <div class="imageGrid">
                 <article v-for="(panel, index) in episode.panels" :key="panel.id" class="imageCard">
@@ -535,7 +530,7 @@
                   <div class="imageCardBody">
                     <span class="sourceTag">{{ panel.shot }}</span>
                     <p>{{ panel.action }}</p>
-                    <details class="generationBrief"><summary>优化提示词与本次修改 · 不调用模型</summary><label :for="`subject${panel.id}`">主要动作执行者</label><select :id="`subject${panel.id}`" v-model="panel.actionSubjectId"><option value="">按分镜描述</option><option v-for="character in episode.castSnapshot.filter((item) => panel.characters.includes(item.id))" :key="character.id" :value="character.id">{{ character.name }}</option></select><label :for="`actionContract${panel.id}`">谁对什么做什么</label><textarea :id="`actionContract${panel.id}`" v-model="panel.actionInstruction" rows="3" maxlength="2000" placeholder="例如：只有橘猫橘子用嘴叼袜子；阿暖在右侧摊开右手，嘴巴闭合。画面只有一人一猫。"></textarea><label :for="`revision${panel.id}`">本次重画要求</label><textarea :id="`revision${panel.id}`" v-model="panel.revisionRequest" rows="2" maxlength="2000" placeholder="指出上一版的错误及应保留的内容。"></textarea><details><summary>查看整理后的实际提示词</summary><pre>{{ imagePrompt(episode, panel, imageModel !== 'zImage/turbo4bit' || zImageReferenceMode === 'reference', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'reference') }}</pre></details></details>
+                    <details class="generationBrief"><summary>优化提示词与本次修改 · 不调用模型</summary><label :for="`subject${panel.id}`">主要动作执行者</label><select :id="`subject${panel.id}`" v-model="panel.actionSubjectId"><option value="">按分镜描述</option><option v-for="character in episode.castSnapshot.filter((item) => panel.characters.includes(item.id))" :key="character.id" :value="character.id">{{ character.name }}</option></select><label :for="`actionContract${panel.id}`">谁对什么做什么</label><textarea :id="`actionContract${panel.id}`" v-model="panel.actionInstruction" rows="3" maxlength="2000" placeholder="例如：只有橘猫橘子用嘴叼袜子；阿暖在右侧摊开右手，嘴巴闭合。画面只有一人一猫。"></textarea><label :for="`revision${panel.id}`">本次重画要求</label><textarea :id="`revision${panel.id}`" v-model="panel.revisionRequest" rows="2" maxlength="2000" placeholder="指出上一版的错误及应保留的内容。"></textarea><details><summary>查看整理后的实际提示词</summary><pre>{{ imagePrompt(episode, panel, imageModel !== 'zImage/turbo4bit' || zImageReferenceMode !== 'text', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'reference', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'character' ? 'The only reference is the selected character design. Preserve identity and outfit, draw the new action, do not copy its pose or design-sheet layout.' : '') }}</pre></details></details>
                     <div v-if="panel.candidate" class="candidateNotice"><strong>新版已保存，等待选择</strong><p>当前仍使用旧版；两版都保留在历史中。</p><button class="primaryButton" @click="openPanelComparison(panel)">对比并选择版本</button></div>
                     <span v-if="panel.image && panel.generationFingerprint !== imageInput(episode, panel)" class="warningText">
                       设定已变化，请重画或明确确认沿用此图。
@@ -781,7 +776,6 @@
           <details><summary>连接失败或本机尚未安装？</summary><p>本机已安装时可直接点击连接。缺少服务请参考项目使用指南，或访问 <a href="https://github.com/xpzouying/xiaohongshu-mcp" target="_blank" rel="noopener noreferrer">开源服务安装说明</a>。若平台要求验证，请在手机端本人完成后再检查连接。</p></details>
         </section>
         <p class="helperText">B站公开视频播放、点赞等指标可在「数据分析 → 作品表现」登记BV链接后同步，无需登录。</p>
-        <details><summary>“小冷漫画”的来源与参考</summary><p>小冷漫画是本次改造的工作名称，基于 <a href="https://github.com/HBAI-Ltd/Toonflow-app" target="_blank" rel="noopener noreferrer">Toonflow</a> 开源项目开发。分镜流程参考 Boords、LTX Studio；角色与风格组织参考 StoryDiffusion、AI Comic Factory。新增热点选题、漫画排版与审稿导出流程。</p></details>
       </div>
 </template>
       <template #comicLocal><localRuntime @imageConnected="(model) => run('选择本地生图', async () => { await loadModels(); imageModel = model; settingsPanel = 'comicDefaults'; })" @connected="(model) => run('接入本地文本模型', async () => { await loadModels(); textMode = 'api'; textModel = model; settingsPanel = 'comicDefaults'; })" @images="settingsPanel = 'mediaModel'" /></template>
@@ -845,7 +839,7 @@ import seriesDesk from "./seriesDesk.vue";
 import personalHub from "./personalHub.vue";
 import { stylePresets, githubStyles } from "./stylePresets";
 import type { StylePreset } from "./stylePresets";
-import { imageInput, imagePrompt, characterSchema, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema, publicationText } from "./model";
+import { imageInput, imagePrompt, referenceReady, characterSchema, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema, publicationText } from "./model";
 import type { Panel, Character, ArtStyle } from "./model";
 
 const newTopicId = () => crypto.randomUUID();
@@ -856,7 +850,7 @@ const route = useRoute();
 const router = useRouter();
 const workspaceMode = computed({ get: () => ["analysis", "archive"].includes(String(route.query.workspace)) ? String(route.query.workspace) : "studio", set: (value: string) => { void router.replace({ query: { ...route.query, workspace: value } }); } });
 const analysisView = computed({ get: () => route.query.panel === "works" ? "works" : "market", set: (value: string) => { void router.replace({ query: { ...route.query, panel: value } }); } });
-const archiveTabs = [{ id: "overview", label: "创作偏好", icon: IconHeart }, { id: "journal", label: "修改记录", icon: IconHistory }, { id: "assets", label: "素材来源", icon: IconBookmarks }];
+const archiveTabs = [{ id: "overview", label: "创作偏好", icon: IconHeart }, { id: "journal", label: "修改记录", icon: IconHistory }, { id: "assets", label: "素材库", icon: IconBookmarks }];
 const archiveView = computed({ get: () => archiveTabs.some((item) => item.id === route.query.panel) ? String(route.query.panel) : "overview", set: (value: string) => { void router.replace({ query: { ...route.query, panel: value } }); } });
 function navigateSection(workspace: string, panel: string) {
   void router.replace({ query: { ...route.query, workspace, panel } });
@@ -913,6 +907,8 @@ const {
   studioAccent,
   studioDensity,
   generateCharacter,
+  analyzeReferences,
+  referenceAnalysisMode,
   exportCharacter,
   textModels,
   imageModels,
@@ -1038,7 +1034,8 @@ function useTopicAsInspiration() {
     await save();
   });
 }
-watch([stage, workspaceMode, analysisView, archiveView], () => window.scrollTo({ top: 0, behavior: "instant" }), { flush: "post" });
+const studioContent = ref<HTMLElement>();
+watch([stage, workspaceMode, analysisView, archiveView, ideaMode], () => { window.scrollTo({ top: 0, behavior: "instant" }); studioContent.value?.scrollTo({ top: 0, behavior: "instant" }); }, { flush: "post" });
 const stages = [
   { title: "热点与来源", icon: IconSearch, eyebrow: "DISCOVER", heading: "好故事，从一个好选题开始。", description: "收集资讯、保留来源，选择值得用漫画表达的话题。" },
   { title: "选题与脚本", icon: IconPencil, eyebrow: "WRITE", heading: "让话题，成为一个故事。", description: "核对事实素材，确定表达角度，完成故事与对白。" },
@@ -1073,7 +1070,7 @@ const letteringPanel = ref(0);
 const largePreviewVisible = ref(false);
 watch(() => episode.value?.id, () => { letteringPanel.value = 0; });
 const studioColors = computed(() => ({ "--studioAccent": uiSettings.value.primaryColor, fontSize: `${14 * uiSettings.value.fontScale / 100}px` }));
-const emptyStyleDraft = { name: "", description: "", avoid: "", refs: [] as ArtStyle["refs"] };
+const emptyStyleDraft: NonNullable<typeof project.value>["styleDraft"] = { name: "", description: "", avoid: "", refs: [], referenceIntent: "style", referenceAnalysis: "", analysisFingerprint: "" };
 const styleDraft = computed(() => project.value?.styleDraft ?? emptyStyleDraft);
 
 function applyGithubStyle(example: typeof githubStyles[number]) {
@@ -1174,6 +1171,20 @@ async function importStory(event: Event) {
     originalStory.value = content.replace(/^\uFEFF/, "");
   });
 }
+async function reuseReference(event: Event, refs: ArtStyle["refs"], maximum = 12) {
+  const input = event.target as HTMLSelectElement;
+  const path = input.value;
+  input.value = "";
+  if (!path) return;
+  await run("复用素材库图片", async () => {
+    const asset = project.value?.assets.find((item) => item.path === path && !item.trashedAt);
+    if (!asset || refs.some((item) => item.path === path)) return;
+    if (refs.length >= maximum) throw new Error("参考图数量已达上限，请先移除不需要的参考");
+    refs.push({ id: crypto.randomUUID(), path, source: asset.source, license: asset.license, note: "" });
+    await ensureImage(path);
+    await save();
+  });
+}
 async function addCharacterReferences(event: Event, character: Character) {
   const input = event.target as HTMLInputElement;
   const selected = [...(input.files || [])];
@@ -1251,6 +1262,8 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.spaceHeading { display: flex; justify-content: space-between; align-items: center; .spaceManage { border: 0; background: transparent; color: #e7eee8; font-size: 24px; padding: 0 8px; cursor: pointer; } }
+.creationSummary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; color: var(--studioMuted); }
 .postToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; select { flex: 1 1 140px; min-width: 0; } }
 .postCandidate { padding: 14px; margin: 16px 0; border: 1px solid var(--studioAccent); border-radius: 10px; background: var(--studioPaper); }
 .postReview { margin: 16px 0; padding: 14px; border: 1px solid var(--studioLine); border-radius: 10px; summary { cursor: pointer; font-weight: 600; } p, pre { overflow-wrap: anywhere; white-space: pre-wrap; } label { display: flex; align-items: center; gap: 8px; margin-top: 10px; input { width: auto; } } }

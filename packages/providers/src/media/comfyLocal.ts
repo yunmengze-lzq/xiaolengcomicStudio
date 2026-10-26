@@ -5,7 +5,7 @@ const rules = [
     { type: "input", field: "sizeNodeId", title: "宽高尺寸节点 ID（输出768×1024）", value: "5" },
     { type: "input", field: "imageNodeIds", title: "参考图 LoadImage 节点 ID（按顺序，逗号分隔）", value: "" },
   ];
-const comfyLocal = {
+export default {
   id: "comfyLocal",
   label: "本地 ComfyUI",
   icon: "",
@@ -70,4 +70,3 @@ const comfyLocal = {
     throw new Error("本地工作流等待超时；任务可能仍在 ComfyUI 队列中，请在本机检查后再重试");
   },
 } satisfies ProviderDefinition;
-export default comfyLocal;

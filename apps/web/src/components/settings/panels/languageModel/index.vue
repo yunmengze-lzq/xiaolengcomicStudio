@@ -3,12 +3,12 @@
     <div class="itemList">
       <el-card v-for="item in sortedProviders" :key="item.id" class="providerItem" shadow="never">
         <div class="providerHeader">
-          <div v-if="item.icon || (!comicStudio && isTfRouterProvider(item))" class="providerMark" aria-hidden="true">
+          <div v-if="(!comicStudio || !isTfRouterProvider(item)) && (item.icon || isTfRouterProvider(item))" class="providerMark" aria-hidden="true">
             <img class="providerLogo" :class="{ monochrome: isTfRouterProvider(item) }" :src="item.icon || logoUrl" alt="" />
           </div>
           <div class="providerInfo">
             <div class="providerHeading">
-              <el-text class="providerName" tag="strong">{{ item.label }}</el-text>
+              <el-text class="providerName" tag="strong">{{ comicStudio && isTfRouterProvider(item) ? '已配置的兼容文本服务' : item.label }}</el-text>
               <el-tag v-if="!comicStudio && isTfRouterProvider(item)" size="small">官方</el-tag>
             </div>
             <el-text class="providerId" size="small" type="info" :title="item.id">{{ item.id }}</el-text>

@@ -12,7 +12,7 @@
     <div v-if="mode === 'builtin'" class="providerPicker">
       <aside class="providerSidebar" aria-label="选择厂商">
         <button
-          v-for="item in mediaProviders"
+          v-for="item in availableProviders"
           :key="item.id"
           class="providerItem"
           type="button"
@@ -30,7 +30,7 @@
             <h3>{{ activeProvider.label }}</h3>
             <el-tag v-if="activeProvider.version" size="small" type="info" effect="plain">v{{ activeProvider.version }}</el-tag>
           </div>
-          <messageMarkdown v-if="providerReadme && (!comicStudio || selectedProvider === 'comfyLocal')" class="providerReadme" :content="providerReadme" />
+          <messageMarkdown v-if="providerReadme && (!comicStudio || ['comfyLocal', 'imageApi'].includes(selectedProvider))" class="providerReadme" :content="providerReadme" />
           <el-divider v-if="providerReadme && (!comicStudio || selectedProvider === 'comfyLocal')" contentPosition="left">连接配置</el-divider>
           <form-create v-model:api="formApi" :rule="providerRules" :option="formOptions" />
           <div class="modelHeader">
@@ -110,6 +110,8 @@ import tfRouterSource from "@toonflow/providers/media/tfRouter?raw";
 import apiMartSource from "@toonflow/providers/media/apiMart?raw";
 import metasoSource from "@toonflow/providers/media/metaso?raw";
 import compshareSource from "@toonflow/providers/media/compshare?raw";
+import comfyLocalSource from "@toonflow/providers/media/comfyLocal?raw";
+import imageApiSource from "@toonflow/providers/media/imageApi?raw";
 import type { MediaProvider } from "./types";
 import { providerPrompt } from "./providerPrompt";
 import { modelChoices, saveSettings } from "@/stores/settings";
@@ -119,8 +121,9 @@ import { isMobile } from "@/lib/platform";
 const { mode = "custom", comicStudio = false } = defineProps<{ mode?: "builtin" | "custom"; comicStudio?: boolean }>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ added: [provider: MediaProvider] }>();
-const providerSources: Record<string, string> = { tfRouter: tfRouterSource, apiMart: apiMartSource, metaso: metasoSource, compshare: compshareSource };
-const selectedProvider = ref<string>(mediaProviders[0]?.id ?? "");
+const providerSources: Record<string, string> = { tfRouter: tfRouterSource, apiMart: apiMartSource, metaso: metasoSource, compshare: compshareSource, comfyLocal: comfyLocalSource, imageApi: imageApiSource };
+const availableProviders = computed(() => mediaProviders.filter((item) => !comicStudio || ["comfyLocal", "imageApi"].includes(item.id)));
+const selectedProvider = ref<string>(availableProviders.value[0]?.id ?? "");
 const activeProvider = computed(() => mediaProviders.find(provider => provider.id === selectedProvider.value));
 const models = computed<MediaProvider["models"]>(() => activeProvider.value?.models ?? []);
 const providerReadme = computed(() => {
@@ -160,7 +163,7 @@ watch(visible, value => {
   agentOpening = undefined;
   openingAgent.value = false;
   if (!value) { agentVisible.value = false; return; }
-  selectedProvider.value = mediaProviders[0]?.id ?? "";
+  selectedProvider.value = availableProviders.value[0]?.id ?? "";
   activeTab.value = "file";
   promptExpanded.value = false;
   formApi.value = undefined;
