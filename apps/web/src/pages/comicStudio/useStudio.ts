@@ -7,7 +7,7 @@ import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import saveFile from "@/lib/saveFile";
 import { uiSettings, settings as appSettings } from "@/stores/settings";
-import { projectSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText } from "./model";
+import { projectSchema, characterSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText } from "./model";
 import type { ComicProject, Topic, Panel, ArtStyle, MemeIdea, Character } from "./model";
 import { keywordInsights } from "./creatorInsights";
 import { renderPages } from "./render";
@@ -33,6 +33,7 @@ const planSchema = z.object({
 
 export default function useStudio() {
   const workspace = useWorkspaceStore();
+  const archivedProjects = ref<{ directory: string; name: string }[]>([]);
   const directory = ref("");
   const files = computed(() => useWorkspaceFiles(directory.value));
   const project = ref<ComicProject>();
@@ -160,9 +161,9 @@ export default function useStudio() {
         ...project.value.assets.map((item) => item.path),
         ...project.value.styleDraft.refs.map((item) => item.path),
         ...project.value.styles.flatMap((style) => style.refs.map((item) => item.path)),
-        ...project.value.characters.map((item) => item.image),
+        ...project.value.characters.flatMap((item) => [item.image, ...item.refs.map((ref) => ref.path)]),
         ...project.value.episodes.flatMap((item) => [
-          ...item.castSnapshot.map((character) => character.image),
+          ...item.castSnapshot.flatMap((character) => [character.image, ...character.refs.map((ref) => ref.path)]),
           ...item.panels.flatMap((panel) => [panel.image, ...panel.history]),
         ]),
       ].filter(Boolean),
@@ -234,6 +235,44 @@ export default function useStudio() {
     project.value.activeEpisodeId = created.id;
     stage.value = 1;
     await save();
+  }
+
+  async function startFromStory(story: string, useExistingCharacters: boolean, characterIds?: string[]) {
+    if (!story.trim() || story.length > 10000) throw new Error("请填写或导入10000字以内的剧情");
+    await startOriginal(story.trim().split("\n")[0]!.slice(0, 80), useExistingCharacters, characterIds);
+    if (!episode.value) return;
+    episode.value.sourceStory = story.trim();
+    episode.value.story = story.trim();
+    episode.value.direction = "忠实整理我提供的剧情，保留主要事件、角色与结局，仅拆分为可画的漫画分镜。";
+    await save();
+  }
+
+  async function renameSpace(title: string) {
+    if (!project.value || !title.trim() || title.trim().length > 100) throw new Error("空间名称需要1–100个字");
+    project.value.title = title.trim();
+    await save();
+    workspace.renameProject(directory.value, project.value.title);
+  }
+
+  async function archiveSpace() {
+    if (!project.value) return;
+    project.value.archived = true;
+    await save();
+    archivedProjects.value.push({ directory: directory.value, name: project.value.title });
+    workspace.removeProject(directory.value);
+    clearUrls();
+    project.value = undefined;
+    directory.value = "";
+    savedText.value = "";
+  }
+
+  async function restoreSpace(path: string) {
+    if (!archivedProjects.value.some((item) => item.directory === path)) throw new Error("请从已删除空间列表选择恢复");
+    await openProject(path);
+    if (directory.value !== path || !project.value) return;
+    project.value.archived = false;
+    await save();
+    archivedProjects.value = archivedProjects.value.filter((item) => item.directory !== path);
   }
 
   const researchStatus = ref("");
@@ -327,12 +366,12 @@ export default function useStudio() {
   async function generateStylePreview() {
     if (!project.value) return;
     const draft = project.value.styleDraft;
-    if (!draft.description.trim()) throw new Error("请先描述画风");
+    if (!draft.description.trim() && !draft.refs.length) throw new Error("请用日常语言描述想要的效果，或先添加参考图");
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model?.configured) throw new Error("请在创作设置选择已配置的图片模型");
     const targetDirectory = directory.value;
-    const prompt = `原创漫画画风样张：两位原创成年角色在咖啡馆交谈，清楚展示脸部、服装、线条、上色与背景。不要文字或既有IP。美术规范：${draft.description}。避免：${draft.avoid}`;
-    const { data } = await requestImage(model, targetDirectory, prompt, []);
+    const prompt = `原创漫画画风样张：两位原创成年角色在咖啡馆交谈，清楚展示脸部、服装、线条、上色与背景。不要文字或既有IP。画风要求：${draft.description || "参考所附图片的线条、配色和上色方式，创作新画面"}。参考图特点：${draft.refs.map((item) => item.note).filter(Boolean).join("；")}。仅借鉴画风，不照搬人物或构图。避免：${draft.avoid}`;
+    const { data } = await requestImage(model, targetDirectory, prompt, draft.refs.map((item) => item.path));
     if (!data.data?.[0]?.path) throw new Error("图片模型没有返回画风样张");
     if (directory.value !== targetDirectory) return;
     const path = data.data[0].path;
@@ -396,12 +435,18 @@ export default function useStudio() {
     const { data } = await axios.get("/api/workspaces/list", { headers: { "x-toonflow-workspace": "1" } });
     const listing = z.object({ absolutePath: z.string(), directories: z.array(z.object({ name: z.string() })) }).parse(data.data);
     let unreadable = 0;
+    archivedProjects.value = [];
     for (const entry of listing.directories.filter((item) => /^comic[a-f0-9]{32}$/.test(item.name))) {
       const path = `${listing.absolutePath}/${entry.name}`;
-      if (workspace.projectList.some((item) => item.directory === path)) continue;
       try {
         const content = await useWorkspaceFiles(path).readJson("comicProject.json");
-        const record = z.object({ comicStudio: z.literal(1), title: z.string().min(1).max(100) }).parse(content);
+        const record = z.object({ comicStudio: z.literal(1), title: z.string().min(1).max(100), archived: z.boolean().default(false) }).parse(content);
+        if (record.archived) {
+          archivedProjects.value.push({ directory: path, name: record.title });
+          workspace.removeProject(path);
+          continue;
+        }
+        if (workspace.projectList.some((item) => item.directory === path)) { workspace.renameProject(path, record.title); continue; }
         await workspace.addProject(path, record.title);
       } catch {
         unreadable++;
@@ -669,6 +714,7 @@ export default function useStudio() {
         codexModel: textMode.value === "codex" ? codexModel.value || undefined : undefined,
         reasoningEffort: textEffort.value,
         context: JSON.stringify({
+          suppliedStory: current.sourceStory ? current.story.slice(0, 10000) : undefined,
           series: project.value ? { title: project.value.series.title, bible: project.value.series.bible.slice(0, 3000), looseEnds: project.value.series.looseEnds.slice(0, 1500) } : undefined,
           previousEpisodes: (() => { const chain = []; let parent = current.parentEpisodeId; const seen = new Set<string>(); while (parent && chain.length < 5 && !seen.has(parent)) { seen.add(parent); const work = project.value?.episodes.find((item) => item.id === parent); if (!work) break; chain.unshift({ title: work.title, episodeNumber: work.episodeNumber, story: work.story.slice(0, 1200) }); parent = work.parentEpisodeId; } return chain; })(),
           research: (() => { const pack = project.value?.researchPacks.find((item) => item.id === current.researchPackId); return pack ? { keyword: pack.keyword, notes: pack.notes.slice(0, 2500), sources: [...pack.materials].sort((a, b) => Number(b.summary.includes("【笔记文字正文")) - Number(a.summary.includes("【笔记文字正文"))).slice(0, 8).map((item) => ({ title: item.title, url: item.url, summary: item.summary.slice(0, 1000), source: item.source })) } : undefined; })(),
@@ -683,7 +729,7 @@ export default function useStudio() {
     if (plan.panels.some((panel) => panel.characters.some((character) => !known.has(character))))
       throw new Error("生成结果引用了未定义角色，当前脚本未被替换，请重试");
     const characterIds = new Map(plan.newCharacters.map((item) => [item.id, crypto.randomUUID()]));
-    const newCharacters = plan.newCharacters.map((item) => ({ ...item, id: characterIds.get(item.id)!, image: "" }));
+    const newCharacters = plan.newCharacters.map((item) => characterSchema.parse({ ...item, id: characterIds.get(item.id)!, image: "" }));
     if (newCharacters.length) {
       project.value!.characters.push(...newCharacters);
       current.castSnapshot = clone(newCharacters);
@@ -707,7 +753,7 @@ export default function useStudio() {
 
   async function publishStyle(draft: { name: string; description: string; avoid: string; refs: ArtStyle["refs"] }) {
     if (!project.value) return;
-    if (!draft.name.trim() || !draft.description.trim()) throw new Error("请填写风格名称和美术规范");
+    if (!draft.name.trim() || (!draft.description.trim() && !draft.refs.length)) throw new Error("请填写风格名称，并添加参考图或描述想要的效果");
     const style = { ...clone(draft), id: crypto.randomUUID(), createdAt: new Date().toISOString() };
     project.value.styles.push(style);
     project.value.activeStyleId = style.id;
@@ -744,13 +790,12 @@ export default function useStudio() {
 
   async function generateCharacter(character: Character) {
     if (!project.value) return;
-    if (!character.name.trim() || !character.description.trim()) throw new Error("请先填写角色名称和固定外形");
-    const style = activeStyle.value;
-    if (!style) throw new Error("请先选择并保存一个默认美术风格");
+    if (!character.name.trim() || (!character.description.trim() && !character.refs.length && !character.image)) throw new Error("请填写角色名称，再用一句话描述或添加角色参考图");
+    const style = activeStyle.value || { description: "原创清晰的漫画角色画风", avoid: "", refs: [] };
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model) throw new Error("请在创作设置中配置图片 API，或导出角色提示词交给 Codex 生成后导入");
     const targetDirectory = directory.value;
-    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style), [...new Set([...style.refs.map((item) => item.path), ...(character.image ? [character.image] : [])])]);
+    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style), [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : []), ...(!character.refs.length && character.image ? [character.image] : [])])]);
     const path = data.data?.[0]?.path;
     if (data.code !== 200 || !path) throw new Error(data.message || "图片服务没有返回角色图");
     if (directory.value !== targetDirectory) return;
@@ -761,12 +806,11 @@ export default function useStudio() {
   }
 
   async function exportCharacter(character: Character) {
-    const style = activeStyle.value;
-    if (!style) throw new Error("请先选择并保存一个默认美术风格");
-    if (!character.description.trim()) throw new Error("请先填写固定外形与性格");
+    const style = activeStyle.value || { description: "原创清晰的漫画角色画风", avoid: "", refs: [] };
+    if (!character.description.trim() && !character.refs.length && !character.image) throw new Error("请添加参考图或描述角色外形");
     const taskFiles = useWorkspaceFiles(directory.value);
     const archive: Record<string, Uint8Array> = { "characterPrompt.txt": strToU8(characterPrompt(character, style)), "character.json": strToU8(JSON.stringify(character, null, 2)), "readme.txt": strToU8("在 Codex 中使用 characterPrompt.txt 与参考图生成角色设定图，然后在角色卡导入。生成后导入角色卡；更新已有角色后，请为需要更新的作品重新绑定设定。") };
-    for (const reference of style.refs) archive[reference.path] = new Uint8Array(await taskFiles.read(reference.path));
+    for (const reference of [...style.refs, ...character.refs]) archive[reference.path] = new Uint8Array(await taskFiles.read(reference.path));
     if (character.image && !archive[character.image]) archive[character.image] = new Uint8Array(await taskFiles.read(character.image));
     const blob = new Blob([zipSync(archive)]);
     const output = `comicCharacter${Date.now()}.zip`;
@@ -777,6 +821,7 @@ export default function useStudio() {
   }
 
   async function requestImage(model: Model, targetDirectory: string, prompt: string, references: string[]) {
+    if (model.providerId === "zImage" && references.length > 1) throw new Error("本机 Z-Image 只能使用一张参考图。请保留一张参考，或切换支持多参考图的生图服务");
     Object.assign(generationProgress, { active: true, phase: "等待模型生成", elapsedSeconds: 0, model: model.label });
     clearInterval(generationTimer);
     const started = Date.now();
@@ -784,7 +829,7 @@ export default function useStudio() {
     const response = await axios.post(model.providerId === "zImage" ? "/api/comicStudio/zImage" : model.providerId === "codex" ? "/api/comicStudio/image" : "/api/ai/media/generate", {
       directory: targetDirectory, mediaType: "image", providerId: model.providerId, modelId: model.modelId,
       codexModel: codexModel.value, quality: zImageQuality.value, prompt, ratio: "3:4", outputDirectory: "assets",
-      images: (model.providerId === "zImage" && zImageReferenceMode.value === "text" ? [] : references).map((path) => ({ path, mimeType: path.endsWith(".jpg") ? "image/jpeg" : path.endsWith(".webp") ? "image/webp" : "image/png" })),
+      images: references.map((path) => ({ path, mimeType: path.endsWith(".jpg") ? "image/jpeg" : path.endsWith(".webp") ? "image/webp" : "image/png" })),
     }, { headers: { "x-toonflow-workspace": "1" }, timeout: model.providerId === "zImage" ? 920000 : model.providerId === "codex" ? 500000 : 300000 });
     generationProgress.phase = "保存图片与版本";
     return response;
@@ -801,7 +846,7 @@ export default function useStudio() {
     generationProgress.panelId = panel.id;
     const fingerprint = imageInput(current, panel);
     const generationPrompt = imagePrompt(current, panel, model.providerId !== "zImage" || localReference, localReference);
-    const references = localReference ? [panel.image] : referencePaths(current, panel);
+    const references = model.providerId === "zImage" ? (localReference ? [panel.image] : []) : referencePaths(current, panel);
     const { data } = await requestImage(model, targetDirectory, generationPrompt, references);
     if (data.code !== 200 || !data.data?.[0]?.path) throw new Error(data.message || "图片服务没有返回可用图片");
     if (directory.value !== targetDirectory) return;
@@ -931,6 +976,11 @@ export default function useStudio() {
   });
 
   return {
+    startFromStory,
+    archivedProjects,
+    renameSpace,
+    archiveSpace,
+    restoreSpace,
     generatePost,
     generationProgress,
     zImageReferenceMode,

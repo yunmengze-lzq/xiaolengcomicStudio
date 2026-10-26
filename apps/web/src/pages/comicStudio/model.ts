@@ -12,7 +12,7 @@ const styleSchema = z.object({
   createdAt: z.string(),
   refs: z.array(referenceSchema).max(30),
 });
-const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, image: z.union([assetPath, z.literal("")]) });
+export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody"]).default("sheet") });
 const topicSchema = z.object({
   id,
   title: z.string().min(1).max(1000),
@@ -85,6 +85,7 @@ const episodeSchema = z.object({
   topic: topicSchema,
   direction: text,
   story: text,
+  sourceStory: text.default(""),
   styleSnapshot: styleSchema.nullable(),
   castSnapshot: z.array(characterSchema).max(30),
   panels: z.array(panelSchema).max(50),
@@ -121,6 +122,7 @@ export const insightSchema = z.object({
   direction: z.string().min(1).max(3000),
 });
 export const projectSchema = z.object({
+  archived: z.boolean().default(false),
   series: z.object({ title: z.string().max(100), bible: z.string().max(4000), looseEnds: z.string().max(3000) }).default({ title: "", bible: "", looseEnds: "" }),
   researchPacks: z.array(z.object({ id, keyword: z.string().min(1).max(80), createdAt: z.string(), materials: z.array(topicSchema).max(100), statuses: z.array(z.object({ platform: z.string().max(30), message: z.string().max(500) })).max(5), notes: z.string().max(10000) })).max(100).default([]),
   marketSnapshots: z.array(z.object({ id, at: z.string(), source: z.string().max(100), items: z.array(topicSchema).max(200) })).default([]),
@@ -186,6 +188,7 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
     topic: JSON.parse(JSON.stringify(topic)),
     direction: "科普或娱乐。用原创角色提出疑问、解释原理或制造反转；热搜只作线索，事实必须有可靠出处。",
     story: "",
+    sourceStory: "",
     styleSnapshot: style ? JSON.parse(JSON.stringify(style)) : null,
     castSnapshot: JSON.parse(JSON.stringify(project.characters)),
     panels: [],
@@ -224,7 +227,7 @@ export function imageInput(episode: Episode, panel: Panel) {
     ...(panel.actionSubjectId || panel.actionInstruction || panel.revisionRequest ? { actionSubjectId: panel.actionSubjectId, actionInstruction: panel.actionInstruction, revisionRequest: panel.revisionRequest } : {}),
     characters: panel.characters,
     style: episode.styleSnapshot,
-    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)),
+    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, ...identity }) => ({ ...identity, ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
     ...(previous?.image ? { previousImage: previous.image } : !previous && episode.continuityImage ? { previousImage: episode.continuityImage } : {}),
   });
 }
@@ -264,7 +267,8 @@ export function splitDialogue(panel: Panel, cast: Character[]): Speech[] {
 }
 
 export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">) {
-  return `Original comic character model sheet of ONE person, no text, no lettering, no logo. Full-body front view, three-quarter view and a head close-up, same identity in all views. Plain light background. If an existing character reference is supplied, preserve its identity.\nName: ${character.name}\nFixed identity, clothing, accessories: ${character.description}\nArt direction: ${style.description}\nAvoid: ${style.avoid}\nPreserve recognizable hairstyle, face shape, outfit colours and distinctive accessories. Do not add extra people.`;
+  const views = { sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
+  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. Character reference images guide identity, silhouette and signature features; style references guide rendering. Reinterpret the character in the requested art direction rather than copying the reference picture.\nName: ${character.name}\nUser's everyday description: ${character.description || "Use the attached character references to preserve recognizable features."}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep recognizable hairstyle, face shape, outfit colours and distinctive accessories consistent. Do not add unrelated characters.`;
 }
 
 export function imagePrompt(episode: Episode, panel: Panel, useReferences = true, referenceIsCurrent = false) {
