@@ -12,7 +12,7 @@ const styleSchema = z.object({
   createdAt: z.string(),
   refs: z.array(referenceSchema).max(30),
 });
-export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody", "turnaround", "expressions"]).default("sheet"), referenceIntent: z.enum(["redesign", "identity", "style"]).default("redesign"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") });
+export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, designImages: z.array(z.object({ path: assetPath, view: z.string().max(30) })).max(100).default([]), aliases: z.string().max(500).default(""), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default(""), image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody", "turnaround", "expressions"]).default("sheet"), referenceIntent: z.enum(["redesign", "identity", "style"]).default("redesign"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") });
 const topicSchema = z.object({
   id,
   title: z.string().min(1).max(1000),
@@ -46,12 +46,16 @@ const speechSchema = z.object({
   x: z.number().min(0).max(0.95),
   y: z.number().min(0).max(0.95),
   width: z.number().min(0.15).max(0.95),
+  kind: z.enum(["dialogue", "thought", "narration"]).default("dialogue"),
+  shape: z.enum(["oval", "cloud", "burst", "box"]).default("oval"),
+  tone: z.enum(["light", "dark"]).default("light"),
   tail: z.enum(["left", "right", "none"]).default("left"),
 });
 const panelSchema = z.object({
   id,
   shot: text,
   action: text,
+  performances: z.array(z.object({ characterId: id, emotion: z.string().max(300), expression: z.string().max(500), pose: z.string().max(500), thought: z.string().max(600) })).max(20).default([]),
   actionSubjectId: z.string().max(100).default(""),
   actionInstruction: z.string().max(2000).default(""),
   revisionRequest: z.string().max(2000).default(""),
@@ -72,7 +76,7 @@ const layoutSchema = z.object({
   perPage: z.union([z.literal(1), z.literal(2), z.literal(4)]),
   fontSize: z.number().int().min(20).max(60),
   background: z.string().regex(/^#[a-fA-F0-9]{6}$/),
-  fontFamily: z.enum(["sans", "wenkai", "serif"]).default("sans"),
+  fontFamily: z.enum(["sans", "wenkai", "serif", "genkiGothic", "huninn", "genkiMin"]).default("sans"),
   textMode: z.enum(["overlay", "safe"]).default("overlay"),
 });
 const episodeSchema = z.object({
@@ -159,6 +163,7 @@ export function newPanel(): Panel {
     id: crypto.randomUUID(),
     shot: "中景",
     action: "",
+    performances: [],
     actionSubjectId: "",
     actionInstruction: "",
     revisionRequest: "",
@@ -226,9 +231,10 @@ export function imageInput(episode: Episode, panel: Panel) {
     shot: panel.shot,
     action: panel.action,
     ...(panel.actionSubjectId || panel.actionInstruction || panel.revisionRequest ? { actionSubjectId: panel.actionSubjectId, actionInstruction: panel.actionInstruction, revisionRequest: panel.revisionRequest } : {}),
+    ...(panel.performances.length ? { performances: panel.performances } : {}),
     characters: panel.characters,
     style: episode.styleSnapshot,
-    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, referenceIntent, referenceAnalysis, analysisFingerprint, ...identity }) => ({ ...identity, ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
+    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, referenceIntent, referenceAnalysis, analysisFingerprint, designImages, aliases, personality, motivation, speechStyle, ...identity }) => ({ ...identity, ...(personality || motivation || speechStyle ? { personality, motivation, speechStyle } : {}), ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
     ...(previous?.image ? { previousImage: previous.image } : !previous && episode.continuityImage ? { previousImage: episode.continuityImage } : {}),
   });
 }
@@ -260,17 +266,26 @@ export function isApproved(episode: Episode, panel: Panel) {
 }
 
 export function splitDialogue(panel: Panel, cast: Character[]): Speech[] {
-  return panel.dialogue.split("\n").filter((line) => line.trim()).slice(0, 6).map((line, index) => {
+  const other = panel.speech.filter((item) => item.kind !== "dialogue");
+  const used = new Set<string>();
+  const dialogue: Speech[] = panel.dialogue.split("\n").filter((line) => line.trim()).slice(0, 6 - other.length).map((line, index) => {
     const match = line.match(/^([^：:]{1,30})[：:]\s*(.*)$/);
-    const character = match ? cast.find((item) => item.name === match[1]?.trim()) : undefined;
-    return { id: crypto.randomUUID(), speakerId: character?.id || "", text: character ? match![2]! : line, x: index % 2 ? 0.51 : 0.04, y: 0.04 + Math.floor(index / 2) * 0.24, width: 0.45, tail: index % 2 ? "right" : "left" };
+    const matches = match ? cast.filter((item) => [item.name, ...item.aliases.split(/[,，、\n]/)].some((name) => name.trim().toLocaleLowerCase() === match[1]?.trim().toLocaleLowerCase())) : [];
+    const character = matches.length === 1 ? matches[0] : undefined;
+    const text = character ? match![2]! : line;
+    const speakerId = character?.id || "";
+    const candidates = panel.speech.filter((item) => item.kind === "dialogue" && item.speakerId === speakerId && !used.has(item.id));
+    const previous = candidates.find((item) => item.text === text) || candidates[0];
+    if (previous) { used.add(previous.id); return { ...previous, speakerId, text }; }
+    return { id: crypto.randomUUID(), kind: "dialogue", shape: "oval", tone: "light", speakerId, text, x: index % 2 ? 0.51 : 0.04, y: 0.04 + Math.floor(index / 2) * 0.24, width: 0.45, tail: index % 2 ? "right" : "left" };
   });
+  return [...dialogue, ...other];
 }
 
 export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">) {
   const views = { turnaround: "One character turnaround sheet with full-body front, side and back views of exactly the same character and outfit.", expressions: "One expression reference sheet: the same character face in six expressions (neutral, happy, surprised, worried, angry, sleepy), stable hairstyle and facial features.", sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
   const intent = { redesign: "Extract distinctive elements AND the visual style, then design a NEW original character. For a logo, object or animal, reinterpret its colours, silhouette and motifs into the requested person or mascot. Do NOT reproduce the input image, layout, collage or original pose.", identity: "Preserve the referenced character identity and outfit; create the requested new views or pose rather than duplicating the original image.", style: "Use ONLY linework, palette, shading and proportions from the reference; invent a new identity from the user's description. Do not copy the original character or composition." };
-  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nReviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
+  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nPersonality to convey through visual attitude: ${character.personality}. Motivation: ${character.motivation}\nReviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
 }
 
 export function referenceReady(target: { refs: { path: string }[]; referenceIntent: string; referenceAnalysis: string; analysisFingerprint: string }) {
@@ -282,11 +297,13 @@ export function imagePrompt(episode: Episode, panel: Panel, useReferences = true
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
   return [
     "Draw one original comic panel, portrait 3:4 composition. No borders, speech bubbles, text, readable signs or watermarks. Leave simple space at the top for later lettering.",
-    ...(cast.length ? [`Characters in this frame: EXACTLY ${cast.length} named characters. Each identity appears once; do not duplicate or merge them.\n${cast.map((item) => `IDENTITY ${item.name}: ${item.description}`).join("\n")}`] : []),
+    ...(cast.length ? [`Characters in this frame: EXACTLY ${cast.length} named characters. Each identity appears once; do not duplicate or merge them.\n${cast.map((item) => `IDENTITY ${item.name}: ${item.description}. Personality: ${item.personality}. Motivation: ${item.motivation}. Speech manner: ${item.speechStyle}`).join("\n")}`] : []),
     ...(panel.actionSubjectId ? [`PRIMARY ACTION SUBJECT: ${cast.find((item) => item.id === panel.actionSubjectId)?.name || "未在本格选择的角色"}. This subject alone performs the primary action. Never transfer this action to another person or animal.`] : []),
+    `Acting direction: convey the current story beat through specific facial muscles, gaze, body tension and gestures. Keep facial identity fixed while expressions change; avoid blank faces, identical smiles and static reference-sheet poses.`,
     `Shot: ${panel.shot}\nScene action: ${panel.action}`,
     ...(panel.actionInstruction ? [`EXPLICIT SUBJECT–ACTION–OBJECT CONTRACT (highest priority): ${panel.actionInstruction}`] : []),
     ...(panel.revisionRequest ? [`CORRECTION REQUIRED: ${panel.revisionRequest}. Keep all other named identities, costumes and intended story unchanged.`] : []),
+    ...panel.performances.filter((item) => panel.characters.includes(item.characterId)).map((item) => `ACTING for ${cast.find((person) => person.id === item.characterId)?.name || item.characterId}: emotional state ${item.emotion}; VISIBLE facial expression ${item.expression}; body language / gaze / pose ${item.pose}. Internal motivation (do not write text in image): ${item.thought}. Show this emotional beat clearly through eyes, brows, mouth and posture; do not reuse a neutral reference pose.`),
     `Style: ${episode.styleSnapshot?.description || "Use the supplied art direction"}`,
     `Avoid: ${episode.styleSnapshot?.avoid || ""}`,
     ...(referenceOverride ? [referenceOverride] : useReferences ? [referenceIsCurrent ? "The only reference is the OLD VERSION OF THIS PANEL. Preserve its art direction and identities, but replace the incorrect action according to the current subject–action contract. Do not preserve action mistakes or duplicated characters." : "References: style images guide linework and colour; character sheets guide identity. Reference images are not the new action. Follow the current subject–action contract even when the previous frame shows a different pose."] : ["No reference image is supplied. Draw the current action from this description; do not reconstruct a preceding frame."]),
@@ -315,5 +332,30 @@ export function safeLink(value: string) {
     return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : undefined;
   } catch {
     return undefined;
+  }
+}
+
+export function matchingCharacter(person: { id: string; name: string; aliases?: string }, library: Character[]) {
+  const exact = library.find((item) => item.id === person.id);
+  if (exact) return exact;
+  const names = (item: { name: string; aliases?: string }) => [item.name, ...(item.aliases || "").split(/[,，、\n]/)].map((name) => name.trim().toLocaleLowerCase()).filter(Boolean);
+  const matches = library.filter((item) => names(item).some((name) => names(person).includes(name)));
+  if (matches.length > 1) throw new Error(`角色「${person.name}」有多个同名或别名匹配，请修改角色名称后绑定`);
+  return matches[0];
+}
+
+export function bindCast(episode: Episode, library: Character[]) {
+  const replacements = new Map<string, string>();
+  const bound = episode.castSnapshot.map((person) => {
+    const target = matchingCharacter(person, library) || person;
+    replacements.set(person.id, target.id);
+    return JSON.parse(JSON.stringify(target)) as Character;
+  });
+  episode.castSnapshot = [...new Map(bound.map((item) => [item.id, item])).values()];
+  for (const panel of episode.panels) {
+    panel.characters = [...new Set(panel.characters.map((id) => replacements.get(id) || id))];
+    panel.actionSubjectId = replacements.get(panel.actionSubjectId) || panel.actionSubjectId;
+    panel.performances.forEach((item) => { item.characterId = replacements.get(item.characterId) || item.characterId; });
+    panel.speech.forEach((item) => { item.speakerId = replacements.get(item.speakerId) || item.speakerId; });
   }
 }

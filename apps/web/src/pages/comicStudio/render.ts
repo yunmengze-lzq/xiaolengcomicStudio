@@ -1,22 +1,26 @@
-import type { Episode, Panel } from "./model";
+import type { Episode, Panel, Speech } from "./model";
 
 type Files = { read: (path: string) => Promise<ArrayBuffer> };
 export const fontFamilies = {
   sans: '"PingFang SC", "Microsoft YaHei", sans-serif',
   wenkai: '"Xiaoleng WenKai", serif',
+  genkiGothic: '"Xiaoleng Genki Gothic", "PingFang SC", sans-serif',
+  huninn: '"Xiaoleng Huninn", "PingFang SC", sans-serif',
+  genkiMin: '"Xiaoleng Genki Min", "Songti SC", serif',
   serif: '"Songti SC", "SimSun", serif',
 };
 
-let wenkaiReady: Promise<void> | undefined;
-async function loadWenkai() {
-  if (!wenkaiReady) {
-    wenkaiReady = (async () => {
-      const face = new FontFace("Xiaoleng WenKai", "url(/fonts/wenKai.ttf)");
-      await face.load();
-      document.fonts.add(face);
-    })().catch(() => { wenkaiReady = undefined; throw new Error("内置文楷加载失败，请检查本地字体资源后重试；也可改选系统字体"); });
-  }
-  return wenkaiReady;
+const fontLoads = new Map<string, Promise<void>>();
+export async function loadComicFont(key: Episode["layout"]["fontFamily"]) {
+  const fonts = { wenkai: ["Xiaoleng WenKai", "wenKai.ttf"], genkiGothic: ["Xiaoleng Genki Gothic", "genkiGothic.otf"], huninn: ["Xiaoleng Huninn", "huninn.ttf"], genkiMin: ["Xiaoleng Genki Min", "genkiMin.otf"] };
+  if (!(key in fonts)) return;
+  const [family, file] = fonts[key as keyof typeof fonts]!;
+  if (!fontLoads.has(key)) fontLoads.set(key, (async () => {
+    const face = new FontFace(family!, `url(/fonts/${file})`);
+    await face.load();
+    document.fonts.add(face);
+  })().catch(() => { fontLoads.delete(key); throw new Error("内置字体加载失败，请重试或改选系统字体"); }));
+  await fontLoads.get(key);
 }
 
 function wrapText(context: CanvasRenderingContext2D, text: string, width: number) {
@@ -52,33 +56,29 @@ async function loadImage(files: Files, path: string) {
   } finally { URL.revokeObjectURL(url); }
 }
 
-function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none") {
+export function bubblePath(shape: Speech["shape"], width = 100, height = 100) {
+  if (shape === "burst") return Array.from({ length: 32 }, (_, index) => { const angle = index * Math.PI / 16, radius = index % 2 ? .88 : 1; return `${index ? "L" : "M"}${width / 2 + Math.cos(angle) * width / 2 * radius},${height / 2 + Math.sin(angle) * height / 2 * radius}`; }).join(" ") + " Z";
+  if (shape === "cloud") return Array.from({ length: 17 }, (_, index) => { const angle = index * Math.PI / 8, mid = angle - Math.PI / 16; const end = `${width / 2 + Math.cos(angle) * width * .47},${height / 2 + Math.sin(angle) * height * .47}`; return index ? `Q${width / 2 + Math.cos(mid) * width * .54},${height / 2 + Math.sin(mid) * height * .54} ${end}` : `M${end}`; }).join(" ") + " Z";
+  const r = shape === "box" ? Math.min(5, height * .08) : Math.min(height * .42, width * .3);
+  return `M${r},0 H${width-r} Q${width},0 ${width},${r} V${height-r} Q${width},${height} ${width-r},${height} H${r} Q0,${height} 0,${height-r} V${r} Q0,0 ${r},0 Z`;
+}
+
+function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none", shape: Speech["shape"] = "oval", tone: Speech["tone"] = "light", kind: Speech["kind"] = "dialogue") {
   const [x, y, width, height] = box;
-  context.fillStyle = "#fffefa";
-  context.strokeStyle = "#202922";
+  context.fillStyle = tone === "dark" ? "#202228" : "#fffefa";
+  context.strokeStyle = "#202228";
   context.lineWidth = 2.5;
-  context.beginPath();
-  const radius = tail === "none" ? 14 : Math.min(height * .42, width * .3);
-  context.moveTo(x + radius, y);
-  context.lineTo(x + width - radius, y);
-  context.quadraticCurveTo(x + width, y, x + width, y + radius);
-  context.lineTo(x + width, y + height - radius);
-  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  if (tail !== "none") {
+  context.save(); context.translate(x, y);
+  const outline = new Path2D(bubblePath(shape, width, height));
+  context.fill(outline); context.stroke(outline); context.restore();
+  if (kind === "thought") {
+    for (const [dx, dy, r] of [[width * .25, height + 8, 6], [width * .2, height + 20, 3]]) { context.beginPath(); context.arc(x + dx!, y + dy!, r!, 0, Math.PI * 2); context.fill(); context.stroke(); }
+  } else if (tail !== "none" && kind !== "narration" && shape === "oval") {
     const anchor = x + width * (tail === "left" ? .3 : .7);
-    context.lineTo(anchor + 10, y + height);
-    context.lineTo(anchor + (tail === "left" ? -12 : 12), y + height + 22);
-    context.lineTo(anchor - 10, y + height);
+    context.beginPath(); context.moveTo(anchor - 10, y + height - 2); context.lineTo(anchor + (tail === "left" ? -12 : 12), y + height + 20); context.lineTo(anchor + 10, y + height - 2); context.fill(); context.stroke();
   }
-  context.lineTo(x + radius, y + height);
-  context.quadraticCurveTo(x, y + height, x, y + height - radius);
-  context.lineTo(x, y + radius);
-  context.quadraticCurveTo(x, y, x + radius, y);
-  context.closePath();
-  context.fill();
-  context.stroke();
-  context.fillStyle = "#182420";
-  lines.forEach((line, index) => context.fillText(line, tail === "none" ? x + 14 : x + (width - context.measureText(line).width) / 2, y + 14 + fontSize * (index * 1.4 + 0.88)));
+  context.fillStyle = tone === "dark" ? "#ffffff" : "#182420";
+  lines.forEach((line, index) => context.fillText(line, x + (width - context.measureText(line).width) / 2, y + 20 + fontSize * (index * 1.4 + .88)));
 }
 
 async function drawPanel(context: CanvasRenderingContext2D, files: Files, episode: Episode, panel: Panel, box: number[]) {
@@ -87,16 +87,16 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   context.font = `500 ${fontSize}px ${fontFamilies[episode.layout.fontFamily]}`;
   const speech = panel.speech.length ? panel.speech.filter((item) => item.text.trim()).map((item) => {
     const speaker = episode.castSnapshot.find((person) => person.id === item.speakerId);
-    return { ...item, label: `${episode.layout.textMode === "safe" && speaker ? `${speaker.name}：` : ""}${item.text}` };
-  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, tail: "left" as const }] : [];
+    return { ...item, label: `${episode.layout.textMode === "safe" && speaker ? `${speaker.name}${item.kind === "thought" ? "（心声）" : ""}：` : ""}${item.text}` };
+  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, kind: "dialogue" as const, shape: "oval" as const, tone: "light" as const, tail: "left" as const }] : [];
   const safe = episode.layout.textMode === "safe";
   const columns = safe && speech.length > 1 ? 2 : 1;
   const gap = 12;
   const rows: number[] = [];
   const bubbles = speech.map((item, index) => {
     const bubbleWidth = safe ? (width - 24 - (columns - 1) * gap) / columns : Math.min(width - 24, width * item.width);
-    const lines = wrapText(context, item.label, bubbleWidth - 28);
-    const bubbleHeight = lines.length * fontSize * 1.4 + 28;
+    const lines = wrapText(context, item.label, bubbleWidth - 56);
+    const bubbleHeight = lines.length * fontSize * 1.4 + 40;
     const row = Math.floor(index / columns);
     rows[row] = Math.max(rows[row] || 0, bubbleHeight);
     return { item, lines, width: bubbleWidth, height: bubbleHeight, row };
@@ -120,7 +120,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
     if (occupied.some(([bx, by, bw, bh]) => left < bx + bw && left + current.width > bx && top < by + bh && top + current.height > by))
       throw new Error("气泡发生重叠，请移动气泡或使用留白排字模式");
     occupied.push([left, top, current.width, current.height]);
-    bubble(context, current.lines, [left, top, current.width, current.height], fontSize, safe ? "none" : current.item.tail);
+    bubble(context, current.lines, [left, top, current.width, current.height], fontSize, safe ? "none" : current.item.tail, current.item.shape, current.item.tone, safe ? "narration" : current.item.kind);
   }
   if (captionLines.length) {
     context.fillStyle = "rgba(249,247,238,.98)";
@@ -137,7 +137,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
 export async function renderPages(episode: Episode, files: Files): Promise<Blob[]> {
   if (!episode.panels.length || episode.panels.some((panel) => !panel.image)) throw new Error("请先完成全部分格出图");
   await document.fonts.ready;
-  if (episode.layout.fontFamily === "wenkai") await loadWenkai();
+  await loadComicFont(episode.layout.fontFamily);
   const pages: Blob[] = [];
   const perPage = episode.layout.perPage;
   for (let offset = 0; offset < episode.panels.length; offset += perPage) {

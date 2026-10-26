@@ -7,7 +7,7 @@ import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import saveFile from "@/lib/saveFile";
 import { uiSettings, settings as appSettings } from "@/stores/settings";
-import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText } from "./model";
+import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter } from "./model";
 import type { ComicProject, Topic, Panel, ArtStyle, MemeIdea, Character } from "./model";
 import { keywordInsights } from "./creatorInsights";
 import { renderPages } from "./render";
@@ -16,12 +16,13 @@ type Model = { providerId: string; modelId: string; label: string; type?: string
 const planSchema = z.object({
   title: z.string().min(1).max(100),
   story: z.string().min(1).max(12000),
-  newCharacters: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500) })).max(4).default([]),
+  newCharacters: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default("") })).max(4).default([]),
   panels: z
     .array(
       z.object({
         shot: z.string().max(100),
         action: z.string().min(1).max(3000),
+        performances: z.array(z.object({ characterId: z.string().max(100), emotion: z.string().max(300), expression: z.string().max(500), pose: z.string().max(500), thought: z.string().max(600) })).max(10).default([]),
         dialogue: z.string().max(240),
         caption: z.string().max(160),
         characters: z.array(z.string()).max(10),
@@ -60,7 +61,7 @@ export default function useStudio() {
   const imageModel = ref("");
   const zImageQuality = ref(z.enum(["draft", "standard", "detail"]).catch("standard").parse(appSettings.value.comicZImageQuality));
   watch(zImageQuality, (value) => { appSettings.value.comicZImageQuality = value; });
-  const zImageReferenceMode = ref(z.enum(["text", "reference", "character"]).catch("text").parse(appSettings.value.comicZImageReferenceMode));
+  const zImageReferenceMode = ref(z.enum(["text", "reference", "character"]).catch("character").parse(appSettings.value.comicZImageReferenceMode));
   const referenceAnalysisMode = ref(z.enum(["selected", "codex"]).catch("selected").parse(appSettings.value.comicReferenceAnalysisMode));
   watch(referenceAnalysisMode, (value) => { appSettings.value.comicReferenceAnalysisMode = value; });
   watch(zImageReferenceMode, (value) => { appSettings.value.comicZImageReferenceMode = value; });
@@ -163,9 +164,9 @@ export default function useStudio() {
         ...project.value.assets.map((item) => item.path),
         ...project.value.styleDraft.refs.map((item) => item.path),
         ...project.value.styles.flatMap((style) => style.refs.map((item) => item.path)),
-        ...project.value.characters.flatMap((item) => [item.image, ...item.refs.map((ref) => ref.path)]),
+        ...project.value.characters.flatMap((item) => [item.image, ...item.designImages.map((design) => design.path), ...item.refs.map((ref) => ref.path)]),
         ...project.value.episodes.flatMap((item) => [
-          ...item.castSnapshot.flatMap((character) => [character.image, ...character.refs.map((ref) => ref.path)]),
+          ...item.castSnapshot.flatMap((character) => [character.image, ...character.designImages.map((design) => design.path), ...character.refs.map((ref) => ref.path)]),
           ...item.panels.flatMap((panel) => [panel.image, ...panel.history]),
         ]),
       ].filter(Boolean),
@@ -707,6 +708,8 @@ export default function useStudio() {
     await save();
     if (current.panels.length) await files.value.writeJson(`storyBackup${Date.now()}.json`, clone(current), true);
     const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
+    const castContext = JSON.stringify(current.castSnapshot.map((item) => matchingCharacter(item, project.value?.characters || []) || item).map(({ id, name, aliases, description, personality, motivation, speechStyle }) => ({ id, name, aliases, description, personality, motivation, speechStyle })));
+    if (castContext.length > 10000) throw new Error("本期角色设定超过编剧输入上限，请减少出场角色或精简设定；尚未调用模型");
     const { data } = await axios.post(
       "/api/comicStudio/plan",
       {
@@ -715,7 +718,7 @@ export default function useStudio() {
         topic: JSON.stringify(current.topic),
         direction: `${current.direction}\n创作者偏好：${project.value?.creator.interests || ""}\n避免：${project.value?.creator.avoid || ""}`.slice(0, 5000),
         style: current.styleSnapshot?.description || "",
-        characters: JSON.stringify(current.castSnapshot),
+        characters: castContext,
         providerId: selected?.providerId,
         modelId: selected?.modelId,
         codexModel: textMode.value === "codex" ? codexModel.value || undefined : undefined,
@@ -730,21 +733,46 @@ export default function useStudio() {
       { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 },
     );
     const plan = planSchema.parse(data.data);
-    if (current.castSnapshot.length && plan.newCharacters.length) throw new Error("生成结果试图替换固定角色，当前设定已保留，请重试");
+    bindCast(current, project.value!.characters);
     if (new Set(plan.newCharacters.map((item) => item.id)).size !== plan.newCharacters.length) throw new Error("生成角色标识重复，当前设定已保留，请重试");
-    const known = new Set([...current.castSnapshot.map((item) => item.id), ...plan.newCharacters.map((item) => item.id)]);
+    const reused = new Map<string, Character>();
+    for (const person of plan.newCharacters) {
+      const match = matchingCharacter({ ...person, id: "" }, project.value!.characters);
+      if (match) reused.set(person.id, match);
+    }
+    const plannedCast = [...new Map([...current.castSnapshot, ...reused.values()].map((item) => [item.id, item])).values()];
+    plan.newCharacters = plan.newCharacters.filter((item) => !reused.has(item.id));
+    plan.panels.forEach((panel) => { panel.characters = panel.characters.map((id) => reused.get(id)?.id || id); panel.performances.forEach((item) => { item.characterId = reused.get(item.characterId)?.id || item.characterId; }); });
+    if (current.castSnapshot.length && plan.newCharacters.length) throw new Error("生成结果试图替换固定角色，当前设定已保留，请重试");
+    const available = [...plannedCast, ...plan.newCharacters];
+    const resolveRole = (value: string) => {
+      if (available.some((item) => item.id === value)) return value;
+      const matches = available.filter((item) => [item.name, ...("aliases" in item && typeof item.aliases === "string" ? item.aliases.split(/[,，、\n]/) : [])].some((name) => name.trim().toLocaleLowerCase() === value.trim().toLocaleLowerCase()));
+      if (matches.length !== 1) throw new Error(`剧本角色「${value}」未唯一匹配，原稿已保留。请补充角色别名`);
+      return matches[0]!.id;
+    };
+    plan.panels.forEach((panel) => { panel.characters = [...new Set(panel.characters.map(resolveRole))]; panel.performances.forEach((item) => { item.characterId = resolveRole(item.characterId); }); });
+    const known = new Set([...plannedCast.map((item) => item.id), ...plan.newCharacters.map((item) => item.id)]);
     if (plan.panels.some((panel) => panel.characters.some((character) => !known.has(character))))
       throw new Error("生成结果引用了未定义角色，当前脚本未被替换，请重试");
+    if (plan.panels.some((panel) => panel.characters.some((id) => !panel.performances.some((item) => item.characterId === id && item.emotion.trim() && item.expression.trim() && item.pose.trim())))) throw new Error("模型遗漏了出场人物的表情或动作，原稿已保留，请重试或更换编剧模型");
+    if (plan.panels.some((panel) => panel.performances.some((item) => !panel.characters.includes(item.characterId)))) throw new Error("表演设定引用了未出场角色，原稿已保留");
     const characterIds = new Map(plan.newCharacters.map((item) => [item.id, crypto.randomUUID()]));
     const newCharacters = plan.newCharacters.map((item) => characterSchema.parse({ ...item, id: characterIds.get(item.id)!, image: "" }));
     if (newCharacters.length) {
       project.value!.characters.push(...newCharacters);
-      current.castSnapshot = clone(newCharacters);
-      plan.panels.forEach((panel) => { panel.characters = panel.characters.map((id) => characterIds.get(id) || id); });
+
+      plan.panels.forEach((panel) => { panel.characters = panel.characters.map((id) => characterIds.get(id) || id); panel.performances.forEach((item) => { item.characterId = characterIds.get(item.characterId) || item.characterId; }); });
     }
+    current.castSnapshot = clone([...plannedCast, ...newCharacters]);
     current.title = plan.title;
     current.story = plan.story;
-    current.panels = plan.panels.map((panel) => { const created = { ...newPanel(), ...panel }; created.speech = splitDialogue(created, current.castSnapshot); return created; });
+    current.panels = plan.panels.map((panel) => { const created = { ...newPanel(), ...panel }; created.speech = splitDialogue(created, current.castSnapshot);
+      for (const acting of created.performances) {
+        if (!created.characters.includes(acting.characterId)) throw new Error("表演设定引用了本格未出场角色，请重试");
+        if (acting.thought.trim() && created.speech.length < 6) created.speech.push({ id: crypto.randomUUID(), speakerId: acting.characterId, text: acting.thought, kind: "thought", shape: "cloud", tone: "light", x: .04, y: .55, width: .45, tail: "none" });
+      }
+      return created; });
     if (!current.postText.trim()) current.postText = plan.title;
     await save();
     stage.value = 2;
@@ -753,7 +781,8 @@ export default function useStudio() {
   async function bindSettings() {
     if (!episode.value || !project.value) return;
     episode.value.styleSnapshot = activeStyle.value ? clone(activeStyle.value) : null;
-    episode.value.castSnapshot = clone(project.value.characters);
+    bindCast(episode.value, project.value.characters);
+    if (!episode.value.castSnapshot.length) episode.value.castSnapshot = clone(project.value.characters);
     await save();
     if (!episode.value.story) stage.value = 1;
   }
@@ -808,12 +837,13 @@ export default function useStudio() {
     if (!model) throw new Error("请在创作设置中配置图片 API，或导出角色提示词交给 Codex 生成后导入");
     const targetDirectory = directory.value;
     if (character.refs.length && character.referenceIntent !== "identity" && (!character.referenceAnalysis || character.analysisFingerprint !== JSON.stringify(character.refs.map((item) => item.path)))) throw new Error("请先分析角色参考图，确认提取的元素与画风后再重新设计；本机不会把原图直接当作新角色");
-    const references = model.providerId === "zImage" && character.referenceIntent !== "identity" ? [] : [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : []), ...(!character.refs.length && character.image ? [character.image] : [])])];
+    const references = character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : model.providerId === "zImage" ? [] : [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : [])])];
     const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style), references);
     const path = data.data?.[0]?.path;
     if (data.code !== 200 || !path) throw new Error(data.message || "图片服务没有返回角色图");
     if (directory.value !== targetDirectory) return;
-    character.image = path;
+    character.designImages.push({ path, view: character.designView });
+    if (!character.image) character.image = path;
     project.value?.assets.push({ path, method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
     await ensureImage(path);
     await save();
@@ -864,11 +894,32 @@ export default function useStudio() {
     return response;
   }
 
+  function panelGenerationIssue(panel: Panel) {
+    const current = episode.value;
+    if (!current?.styleSnapshot) return "请先同步本期画风";
+    const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
+    if (!model?.configured) return "请先选择已配置的生图服务";
+    let cast: Character[];
+    try { cast = current.castSnapshot.filter((item) => panel.characters.includes(item.id)).map((item) => matchingCharacter(item, project.value?.characters || []) || item); } catch (error) { return (error as Error).message; }
+    if (panel.characters.some((id) => !current.castSnapshot.some((item) => item.id === id))) return "本格有未绑定角色，请到分镜设计选择角色";
+    if (cast.some((item) => !item.image)) return "请先为本格角色生成或导入正式图，再开始分格出图";
+    if (model.providerId === "zImage") {
+      if (cast.length > 1) return "本格多角色同框：Z-Image 只有单图参考，请选择支持多参考的API或ComfyUI";
+      if (cast.length && zImageReferenceMode.value !== "character") return "固定人物需要选择‘固定角色参考’；文生图和旧图修订不传正式角色图";
+      if (!cast.length && zImageReferenceMode.value === "character") return "本格未选角色；纯环境画面请选择文生图，或先在分镜设计选择人物";
+      if (zImageReferenceMode.value === "reference" && !panel.image) return "旧图修订需要已有图片；首次环境出图请选择文生图";
+    }
+    return "";
+  }
+
   async function generatePanel(panel: Panel) {
     const current = episode.value;
     if (!current?.styleSnapshot) throw new Error("请先为本期绑定美术风格");
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model) throw new Error("请在模型设置中配置图片供应商，或使用 Codex 任务包后导入图片");
+    bindCast(current, project.value!.characters);
+    const issue = panelGenerationIssue(panel);
+    if (issue) throw new Error(issue);
     const targetDirectory = directory.value;
     const localReference = model.providerId === "zImage" && zImageReferenceMode.value === "reference";
     if (localReference && !panel.image) throw new Error("本地图生图需要本格已有图片；首次出图请选择‘文生图 · 本格动作优先’");
@@ -1092,6 +1143,7 @@ export default function useStudio() {
     bindSettings,
     publishStyle,
     adoptImage,
+    panelGenerationIssue,
     generatePanel,
     generateMissingPanels,
     exportCodexTask,

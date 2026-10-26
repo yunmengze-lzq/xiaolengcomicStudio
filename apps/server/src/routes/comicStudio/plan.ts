@@ -41,6 +41,7 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
       `已提供角色时复用其身份，newCharacters 返回空数组，分镜 characters 只使用提供的角色 ID。未提供角色时，在 newCharacters 创建故事需要的1–4位原创固定角色，id用character1等英文标识，description写清年龄段、发型、脸部、服装颜色、配饰和性格；动物注明物种和固定外形。各格 characters 使用这些新角色的id，台词使用其name。角色身份与服装不要随分镜改变。\n` +
       `依次完成三项职责并在一次回答内修正问题：编剧组织故事；导演检查镜头可画性；审稿检查事实和连续性。最终只返回 JSON，不输出内部推理。\n` +
       `科普采用疑问→可视化原理→适用边界→结论；娱乐采用铺垫→误会或冲突→反转→收束。热搜只作线索，不能当作事实证据。\n` +
+      `每格 performances 为所有出场角色逐一填写 characterId、emotion（本格情绪）、expression（眼眉嘴的具体表情）、pose（动作/视线/肢体）、thought（必要时的内心独白，不需要则空串）。用性格与动机推动选择；根据剧情逐格变化表情，禁止所有格都中性脸。newCharacters 的 personality、motivation、speechStyle 分别填写性格、动机、说话方式。已给角色的 name/aliases 与用户剧情同名时必须绑定其 ID；不把同名人物另画成陌生人。内心独白只放 thought，不混入 dialogue；caption 仅用于旁白。\n` +
       `每格只含一个主要可见动作，交代环境与构图；相邻格保持服装、道具、持物手和空间关系连续。\n` +
       `若上下文含 suppliedStory，这是用户自带的剧情正文，任务是忠实整理并拆分成分镜，保留主要人物、事件、因果与结局，不另起故事；只做必要的可视化和对白精简。\n` +
       `画面动作不要求可读文字或标牌；需要读者阅读的文字放进 dialogue 或 caption，由软件独立排版。\n` +

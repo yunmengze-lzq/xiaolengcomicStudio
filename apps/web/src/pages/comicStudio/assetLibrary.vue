@@ -35,10 +35,10 @@ const usage = computed(() => {
   const p = props.project;
   p.styleDraft.refs.forEach((item) => add(item.path, "画风草稿参考"));
   p.styles.forEach((style) => style.refs.forEach((item) => add(item.path, `画风：${style.name}`)));
-  p.characters.forEach((character) => { add(character.image, `角色：${character.name}`); character.refs.forEach((item) => add(item.path, `角色参考：${character.name}`)); });
+  p.characters.forEach((character) => { add(character.image, `角色：${character.name}`); character.designImages.forEach((item) => add(item.path, `角色设计：${character.name}`)); character.refs.forEach((item) => add(item.path, `角色参考：${character.name}`)); });
   p.episodes.forEach((episode) => {
     add(episode.continuityImage, `连续集：${episode.title}`);
-    episode.castSnapshot.forEach((character) => { add(character.image, `作品角色：${episode.title}`); character.refs.forEach((item) => add(item.path, `作品参考：${episode.title}`)); });
+    episode.castSnapshot.forEach((character) => { add(character.image, `作品角色：${episode.title}`); character.designImages.forEach((item) => add(item.path, `作品角色设计：${episode.title}`)); character.refs.forEach((item) => add(item.path, `作品参考：${episode.title}`)); });
     episode.styleSnapshot?.refs.forEach((item) => add(item.path, `作品画风：${episode.title}`));
     episode.panels.forEach((panel) => { add(panel.image, `漫画：${episode.title}`); panel.history.forEach((path) => add(path, `历史版本：${episode.title}`)); if (panel.candidate) add(panel.candidate.path, `候选图：${episode.title}`); });
   });
