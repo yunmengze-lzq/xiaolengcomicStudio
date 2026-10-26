@@ -56,26 +56,29 @@ async function loadImage(files: Files, path: string) {
   } finally { URL.revokeObjectURL(url); }
 }
 
-export function bubblePath(shape: Speech["shape"], width = 100, height = 100) {
+export function bubblePath(shape: Speech["shape"], width = 100, height = 100, tail: "left" | "right" | "none" = "none", tailLength = .2) {
   if (shape === "burst") return Array.from({ length: 32 }, (_, index) => { const angle = index * Math.PI / 16, radius = index % 2 ? .88 : 1; return `${index ? "L" : "M"}${width / 2 + Math.cos(angle) * width / 2 * radius},${height / 2 + Math.sin(angle) * height / 2 * radius}`; }).join(" ") + " Z";
   if (shape === "cloud") return Array.from({ length: 17 }, (_, index) => { const angle = index * Math.PI / 8, mid = angle - Math.PI / 16; const end = `${width / 2 + Math.cos(angle) * width * .47},${height / 2 + Math.sin(angle) * height * .47}`; return index ? `Q${width / 2 + Math.cos(mid) * width * .54},${height / 2 + Math.sin(mid) * height * .54} ${end}` : `M${end}`; }).join(" ") + " Z";
+  if (shape === "oval") {
+    if (tail === "none") return `M${width},${height/2} A${width/2},${height/2} 0 1 1 0,${height/2} A${width/2},${height/2} 0 1 1 ${width},${height/2} Z`;
+    const angle = tail === "left" ? Math.PI * 2 / 3 : Math.PI / 3;
+    const point = (a: number) => `${width/2 + Math.cos(a)*width/2},${height/2 + Math.sin(a)*height/2}`;
+    return `M${width},${height/2} A${width/2},${height/2} 0 0 1 ${point(angle-.13)} L${width * (tail === "left" ? .18 : .82)},${height*(1+tailLength)} L${point(angle+.13)} A${width/2},${height/2} 0 1 1 ${width},${height/2} Z`;
+  }
   const r = shape === "box" ? Math.min(5, height * .08) : Math.min(height * .42, width * .3);
   return `M${r},0 H${width-r} Q${width},0 ${width},${r} V${height-r} Q${width},${height} ${width-r},${height} H${r} Q0,${height} 0,${height-r} V${r} Q0,0 ${r},0 Z`;
 }
 
-function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none", shape: Speech["shape"] = "oval", tone: Speech["tone"] = "light", kind: Speech["kind"] = "dialogue") {
+function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none", shape: Speech["shape"] = "oval", tone: Speech["tone"] = "light", kind: Speech["kind"] = "dialogue", tailLength = .2) {
   const [x, y, width, height] = box;
   context.fillStyle = tone === "dark" ? "#202228" : "#fffefa";
   context.strokeStyle = "#202228";
   context.lineWidth = 2.5;
   context.save(); context.translate(x, y);
-  const outline = new Path2D(bubblePath(shape, width, height));
+  const outline = new Path2D(bubblePath(shape, width, height, kind === "dialogue" ? tail : "none", tailLength));
   context.fill(outline); context.stroke(outline); context.restore();
   if (kind === "thought") {
     for (const [dx, dy, r] of [[width * .25, height + 8, 6], [width * .2, height + 20, 3]]) { context.beginPath(); context.arc(x + dx!, y + dy!, r!, 0, Math.PI * 2); context.fill(); context.stroke(); }
-  } else if (tail !== "none" && kind !== "narration" && shape === "oval") {
-    const anchor = x + width * (tail === "left" ? .3 : .7);
-    context.beginPath(); context.moveTo(anchor - 10, y + height - 2); context.lineTo(anchor + (tail === "left" ? -12 : 12), y + height + 20); context.lineTo(anchor + 10, y + height - 2); context.fill(); context.stroke();
   }
   context.fillStyle = tone === "dark" ? "#ffffff" : "#182420";
   lines.forEach((line, index) => context.fillText(line, x + (width - context.measureText(line).width) / 2, y + 20 + fontSize * (index * 1.4 + .88)));
@@ -88,7 +91,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   const speech = panel.speech.length ? panel.speech.filter((item) => item.text.trim()).map((item) => {
     const speaker = episode.castSnapshot.find((person) => person.id === item.speakerId);
     return { ...item, label: `${episode.layout.textMode === "safe" && speaker ? `${speaker.name}${item.kind === "thought" ? "（心声）" : ""}：` : ""}${item.text}` };
-  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, kind: "dialogue" as const, shape: "oval" as const, tone: "light" as const, tail: "left" as const }] : [];
+  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, kind: "dialogue" as const, shape: "oval" as const, tone: "light" as const, tail: "left" as const, tailLength: .2 }] : [];
   const safe = episode.layout.textMode === "safe";
   const columns = safe && speech.length > 1 ? 2 : 1;
   const gap = 12;
@@ -115,12 +118,13 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   const occupied: number[][] = [];
   for (const [index, current] of bubbles.entries()) {
     const left = safe ? x + 12 + (index % columns) * (current.width + gap) : x + Math.min(current.item.x * width, width - current.width - 12);
-    const top = safe ? y + 12 + rows.slice(0, current.row).reduce((sum, value) => sum + value + gap, 0) : y + Math.min(current.item.y * height, height - captionHeight - current.height - 12);
-    if (top < y || top + current.height + (!safe && current.item.tail !== "none" ? 22 : 0) > y + height - captionHeight) throw new Error("对白超出可用区域，请缩短文字或调整气泡位置");
+    const tailPad = safe ? 0 : current.item.kind === "thought" ? 26 : current.item.tail !== "none" && current.item.shape === "oval" ? current.height * (current.item.tailLength ?? .2) : 0;
+    const top = safe ? y + 12 + rows.slice(0, current.row).reduce((sum, value) => sum + value + gap, 0) : y + Math.min(current.item.y * height, height - captionHeight - current.height - tailPad - 12);
+    if (top < y || top + current.height + tailPad > y + height - captionHeight) throw new Error("对白超出可用区域，请缩短文字或调整气泡位置");
     if (occupied.some(([bx, by, bw, bh]) => left < bx + bw && left + current.width > bx && top < by + bh && top + current.height > by))
       throw new Error("气泡发生重叠，请移动气泡或使用留白排字模式");
-    occupied.push([left, top, current.width, current.height]);
-    bubble(context, current.lines, [left, top, current.width, current.height], fontSize, safe ? "none" : current.item.tail, current.item.shape, current.item.tone, safe ? "narration" : current.item.kind);
+    occupied.push([left, top, current.width, current.height + tailPad]);
+    bubble(context, current.lines, [left, top, current.width, current.height], fontSize, safe ? "none" : current.item.tail, current.item.shape, current.item.tone, safe ? "narration" : current.item.kind, current.item.tailLength);
   }
   if (captionLines.length) {
     context.fillStyle = "rgba(249,247,238,.98)";

@@ -452,13 +452,13 @@
               </template>
               <div v-if="artTab === 'characters'" class="surface">
                 <div class="sectionTitle">
-                  <h2>固定角色库 · {{ project.characters.length }} 位</h2><button class="secondaryButton" @click="run('保存角色库', async () => { await save(); ideaMode = 'series'; originalCastMode = 'fixed'; originalCharacterIds = project!.characters.map((item) => item.id); stage = 0; })">保存角色，去创作</button>
+                  <h2>固定角色库 · {{ project.characters.length }} 位</h2><button class="secondaryButton" @click="run('保存角色库', save)">保存角色</button>
                   <button class="textButton" @click="addCharacter">
                     <icon-plus :size="16" />
                     新增角色
                   </button>
                 </div>
-                <p class="helperText">每个角色只维护一份档案。性格与说话方式交给编剧，正式角色图交给生图模型；多角色同框需要支持多参考图的服务。</p>
+                <p class="helperText">每个角色只维护一份档案。性格与说话方式交给编剧，正式角色图交给生图模型；本地可用文字设定绘制多人场景；多参考图片与身份约束取决于所选服务。</p>
                 <div class="characterPicker" aria-label="选择编辑角色"><button v-for="person in project.characters" :key="person.id" :class="{ selected: selectedCharacterId === person.id || !selectedCharacterId && person.id === project?.characters[0]?.id }" @click="selectedCharacterId = person.id"><img v-if="person.image" :src="imageUrls[person.image]" alt="" /><span>{{ person.name }}</span><small>{{ person.image ? '已有正式图' : '待设置形象' }}</small></button></div>
                 <div class="characterGrid">
                   <article v-for="character in project.characters.filter((item) => item.id === selectedCharacterId || !selectedCharacterId && item.id === project?.characters[0]?.id)" :key="character.id" class="characterCard">
@@ -478,6 +478,7 @@
                     <h3>角色档案 · 编剧和出图共用</h3><label :for="`${character.id}Description`">固定外形 · 发型、物种、服装与识别特征</label>
 
                     <textarea :id="`${character.id}Description`" v-model="character.description" rows="4" placeholder="例如：想做一个蓝白配色、长发、聪明温柔的 DeepSeek 娘；保留参考图发型，衣服更日常。不需要懂绘画术语。"></textarea>
+                    <label :for="`${character.id}Visual`">固定外形摘要 · 用于角色与分格生图</label><textarea :id="`${character.id}Visual`" v-model="character.visualSummary" rows="3" maxlength="1000" :placeholder="characterVisual(character) || '分析图片后会提取；可以自己修改发型、瞳色、服装和配饰。'"></textarea>
                     <label :for="`${character.id}Aliases`">剧情里的别名 · 逗号分隔，自动匹配</label><input :id="`${character.id}Aliases`" v-model="character.aliases" maxlength="500" placeholder="例如：小D，DeepSeek娘" />
                     <div class="twoFields"><div><label :for="`${character.id}Personality`">性格与习惯</label><textarea :id="`${character.id}Personality`" v-model="character.personality" rows="3" maxlength="1500" placeholder="例如：外冷内热，紧张时嘴硬，习惯先观察再行动"></textarea></div><div><label :for="`${character.id}Motivation`">动机与在意的事</label><textarea :id="`${character.id}Motivation`" v-model="character.motivation" rows="3" maxlength="1000" placeholder="例如：想被认可，但不愿轻易示弱"></textarea></div></div>
                     <label :for="`${character.id}Speech`">说话方式 · 用于对白和心理描写</label><textarea :id="`${character.id}Speech`" v-model="character.speechStyle" rows="2" maxlength="1000" placeholder="例如：短句、冷幽默；心里吐槽，嘴上克制"></textarea>
@@ -488,8 +489,8 @@
                     <label>复用素材库图片<select @change="reuseReference($event, character.refs)"><option value="">从本空间素材库选择，不重复保存文件</option><option v-for="asset in project.assets.filter((item) => !item.trashedAt)" :key="asset.path" :value="asset.path">{{ asset.source || '本机图片' }} · {{ asset.path }}</option></select></label>
                     <div class="referenceGrid"><figure v-for="reference in character.refs" :key="reference.id"><img :src="imageUrls[reference.path]" :alt="`${character.name}的生成参考图`" /><input v-model="reference.note" aria-label="角色参考图特点" placeholder="想保留什么？如发型、衣服、配色" /><input v-model="reference.source" aria-label="角色参考图来源" placeholder="来源或作者（自己审核用）" /><button class="textButton" @click="character.refs = character.refs.filter((item) => item.id !== reference.id)">移除此参考</button></figure><label class="uploadTile" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload"><icon-photo-plus :size="24" /><span>添加生成参考图</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple :aria-label="`添加${character.name}参考图`" @change="addCharacterReferences($event, character)" /></label></div>
                     <button class="secondaryButton" :disabled="!character.refs.length" @click="run('分析角色参考图', () => analyzeReferences(character, 'character'))">1 · 分析参考图</button><label :for="`${character.id}Analysis`">图片提取与角色设计说明 · 可修改</label><textarea :id="`${character.id}Analysis`" v-model="character.referenceAnalysis" rows="4" maxlength="3000" placeholder="分析后先检查保留元素、画风和新的角色设计，再生成。"></textarea>
-                    <p class="helperText">参考原图不会自动变成生成结果。重新设计需先分析；分析和生图分别调用模型。Z-Image 重新设计使用提取的文字文生图，保持角色才用单图参考。</p>
-                    <div class="panelActions"><button class="primaryButton" :disabled="!!busy || !imageModel || !referenceReady(character)" @click="run('生成角色设定图', () => generateCharacter(character))">2 · 生成角色设计</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div></details>
+                    <p class="helperText">本地角色设计使用外形摘要、当前画风、性格和所选视图重新绘制，不混合原图像素，避免继承原图分栏。参考图用于分析；本地身份一致性仍需审核。</p>
+                    <details><summary>查看实际角色生成提示词</summary><pre>{{ characterPrompt(character, project.styles.find((item) => item.id === project?.activeStyleId) || { description: '', avoid: '' }, imageModel === 'zImage/turbo4bit') }}</pre></details><div class="panelActions"><button class="primaryButton" :disabled="!!busy || !imageModel || !referenceReady(character)" @click="run('生成角色设定图', () => generateCharacter(character))">2 · 生成角色设计</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div></details>
                   </article>
                 </div>
               </div>
@@ -515,7 +516,7 @@
                       {{ model.label }}
                     </option>
                   </select>
-                  <template v-if="imageModel === 'zImage/turbo4bit'"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">文生图 · 本格动作优先</option><option value="character">固定角色参考 · 单角色新动作</option><option value="reference">参考本格旧图 · 修订画面</option></select></template>
+                  <template v-if="imageModel === 'zImage/turbo4bit'"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">按分镜重绘 · 支持单人和多人</option><option value="reference">参考本格旧图 · 修订画面</option></select></template>
                   <button class="secondaryButton" @click="openSettings('comicDefaults')">配置服务</button>
                   <button class="primaryButton" :disabled="!imageModel" @click="run('连续生成待出图', generateMissingPanels)">连续生成待出图</button>
                 </div>
@@ -525,7 +526,7 @@
                 </button>
               </div>
               <p class="helperText">
-                <template v-if="imageModel === 'zImage/turbo4bit'">本地文生图只用文字；固定角色参考模式会传入一位角色的正式设定图，并按本格动作重画。参考旧图模式可能继承旧姿势。Z-Image 不保证身份锁定，多角色同框请选多参考图片API或ComfyUI工作流。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
+                <template v-if="imageModel === 'zImage/turbo4bit'">本地默认把角色外形摘要、性格和分镜动作合成文字后重绘，支持多人。普通图生图会保留设定图布局，所以仅用于明确选择的旧图修订；本地身份一致性仍需审核。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
               </p>
               <div class="imageGrid">
                 <article v-for="(panel, index) in episode.panels" :key="panel.id" class="imageCard">
@@ -541,8 +542,8 @@
                   <div class="imageCardBody">
                     <span class="sourceTag">{{ panel.shot }}</span>
                     <p>{{ panel.action }}</p>
-                    <details class="generationBrief"><summary>优化提示词与本次修改 · 不调用模型</summary><label :for="`subject${panel.id}`">主要动作执行者</label><select :id="`subject${panel.id}`" v-model="panel.actionSubjectId"><option value="">按分镜描述</option><option v-for="character in episode.castSnapshot.filter((item) => panel.characters.includes(item.id))" :key="character.id" :value="character.id">{{ character.name }}</option></select><label :for="`actionContract${panel.id}`">谁对什么做什么</label><textarea :id="`actionContract${panel.id}`" v-model="panel.actionInstruction" rows="3" maxlength="2000" placeholder="例如：只有橘猫橘子用嘴叼袜子；阿暖在右侧摊开右手，嘴巴闭合。画面只有一人一猫。"></textarea><label :for="`revision${panel.id}`">本次重画要求</label><textarea :id="`revision${panel.id}`" v-model="panel.revisionRequest" rows="2" maxlength="2000" placeholder="指出上一版的错误及应保留的内容。"></textarea><details><summary>查看整理后的实际提示词</summary><pre>{{ imagePrompt(episode, panel, imageModel !== 'zImage/turbo4bit' || zImageReferenceMode !== 'text', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'reference', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'character' ? 'The only reference is the selected character design. Preserve identity and outfit, draw the new action, do not copy its pose or design-sheet layout.' : '') }}</pre></details></details>
-                    <p class="helperText">绑定角色：{{ episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map((item) => item.name).join('、') || '环境画面' }} · 表情动作在“分镜设计”调整</p><p v-if="panelGenerationIssue(panel)" class="warningText" role="status">{{ panelGenerationIssue(panel) }}</p>
+                    <details class="generationBrief"><summary>优化提示词与本次修改 · 不调用模型</summary><label :for="`subject${panel.id}`">主要动作执行者</label><select :id="`subject${panel.id}`" v-model="panel.actionSubjectId"><option value="">按分镜描述</option><option v-for="character in episode.castSnapshot.filter((item) => panel.characters.includes(item.id))" :key="character.id" :value="character.id">{{ character.name }}</option></select><label :for="`actionContract${panel.id}`">谁对什么做什么</label><textarea :id="`actionContract${panel.id}`" v-model="panel.actionInstruction" rows="3" maxlength="2000" placeholder="例如：只有橘猫橘子用嘴叼袜子；阿暖在右侧摊开右手，嘴巴闭合。画面只有一人一猫。"></textarea><label :for="`revision${panel.id}`">本次重画要求</label><textarea :id="`revision${panel.id}`" v-model="panel.revisionRequest" rows="2" maxlength="2000" placeholder="指出上一版的错误及应保留的内容。"></textarea><label :for="`exactPrompt${panel.id}`">直接使用自己的生图提示词 · 留空则自动整理</label><textarea :id="`exactPrompt${panel.id}`" v-model="panel.imagePromptOverride" rows="4" maxlength="8000" placeholder="填写后原文提交，不额外拼接或改写；本地模型上限512 tokens，长提示词可能被截断。需要显示的文字请在字幕页添加。"></textarea><details><summary>查看本次实际提交的提示词</summary><pre>{{ imagePrompt(episode, panel, imageModel !== 'zImage/turbo4bit' || zImageReferenceMode === 'reference', imageModel === 'zImage/turbo4bit' && zImageReferenceMode === 'reference', '', imageModel === 'zImage/turbo4bit') }}</pre></details></details>
+                    <p class="helperText">绑定角色：{{ episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map((item) => scriptRoleNames(episode!).has(item.id) ? `${scriptRoleNames(episode!).get(item.id)} → ${item.name}` : item.name).join('、') || '环境画面' }} · 表情动作在“分镜设计”调整</p><p v-if="panelGenerationIssue(panel)" class="warningText" role="status">{{ panelGenerationIssue(panel) }}</p>
                     <div v-if="panel.candidate" class="candidateNotice"><strong>新版已保存，等待选择</strong><p>当前仍使用旧版；两版都保留在历史中。</p><button class="primaryButton" @click="openPanelComparison(panel)">对比并选择版本</button></div>
                     <span v-if="panel.image && panel.generationFingerprint !== imageInput(episode, panel)" class="warningText">
                       设定已变化，请重画或明确确认沿用此图。
@@ -851,7 +852,7 @@ import seriesDesk from "./seriesDesk.vue";
 import personalHub from "./personalHub.vue";
 import { stylePresets, githubStyles } from "./stylePresets";
 import type { StylePreset } from "./stylePresets";
-import { imageInput, imagePrompt, referenceReady, characterSchema, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema, publicationText } from "./model";
+import { imageInput, imagePrompt, referenceReady, characterSchema, scriptRoleNames, characterVisual, characterPrompt, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema, publicationText } from "./model";
 import type { Panel, Character, ArtStyle } from "./model";
 
 const newTopicId = () => crypto.randomUUID();

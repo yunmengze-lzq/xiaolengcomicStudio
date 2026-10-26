@@ -12,7 +12,7 @@ const styleSchema = z.object({
   createdAt: z.string(),
   refs: z.array(referenceSchema).max(30),
 });
-export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, designImages: z.array(z.object({ path: assetPath, view: z.string().max(30) })).max(100).default([]), aliases: z.string().max(500).default(""), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default(""), image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody", "turnaround", "expressions"]).default("sheet"), referenceIntent: z.enum(["redesign", "identity", "style"]).default("redesign"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") });
+export const characterSchema = z.object({ id, name: z.string().min(1).max(100), description: text, visualSummary: z.string().max(1000).default(""), designImages: z.array(z.object({ path: assetPath, view: z.string().max(30) })).max(100).default([]), aliases: z.string().max(500).default(""), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default(""), image: z.union([assetPath, z.literal("")]), refs: z.array(referenceSchema).max(12).default([]), artDirection: z.string().max(1000).default(""), designView: z.enum(["sheet", "portrait", "fullBody", "turnaround", "expressions"]).default("sheet"), referenceIntent: z.enum(["redesign", "identity", "style"]).default("redesign"), referenceAnalysis: z.string().max(3000).default(""), analysisFingerprint: z.string().max(5000).default("") });
 const topicSchema = z.object({
   id,
   title: z.string().min(1).max(1000),
@@ -49,6 +49,7 @@ const speechSchema = z.object({
   kind: z.enum(["dialogue", "thought", "narration"]).default("dialogue"),
   shape: z.enum(["oval", "cloud", "burst", "box"]).default("oval"),
   tone: z.enum(["light", "dark"]).default("light"),
+  tailLength: z.number().min(.05).max(.5).optional(),
   tail: z.enum(["left", "right", "none"]).default("left"),
 });
 const panelSchema = z.object({
@@ -56,6 +57,7 @@ const panelSchema = z.object({
   shot: text,
   action: text,
   performances: z.array(z.object({ characterId: id, emotion: z.string().max(300), expression: z.string().max(500), pose: z.string().max(500), thought: z.string().max(600) })).max(20).default([]),
+  imagePromptOverride: z.string().max(8000).default(""),
   actionSubjectId: z.string().max(100).default(""),
   actionInstruction: z.string().max(2000).default(""),
   revisionRequest: z.string().max(2000).default(""),
@@ -164,6 +166,7 @@ export function newPanel(): Panel {
     shot: "中景",
     action: "",
     performances: [],
+    imagePromptOverride: "",
     actionSubjectId: "",
     actionInstruction: "",
     revisionRequest: "",
@@ -232,9 +235,10 @@ export function imageInput(episode: Episode, panel: Panel) {
     action: panel.action,
     ...(panel.actionSubjectId || panel.actionInstruction || panel.revisionRequest ? { actionSubjectId: panel.actionSubjectId, actionInstruction: panel.actionInstruction, revisionRequest: panel.revisionRequest } : {}),
     ...(panel.performances.length ? { performances: panel.performances } : {}),
+    ...(panel.imagePromptOverride ? { imagePromptOverride: panel.imagePromptOverride } : {}),
     characters: panel.characters,
     style: episode.styleSnapshot,
-    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, referenceIntent, referenceAnalysis, analysisFingerprint, designImages, aliases, personality, motivation, speechStyle, ...identity }) => ({ ...identity, ...(personality || motivation || speechStyle ? { personality, motivation, speechStyle } : {}), ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
+    cast: episode.castSnapshot.filter((item) => panel.characters.includes(item.id)).map(({ refs, artDirection, designView, referenceIntent, referenceAnalysis, analysisFingerprint, designImages, aliases, visualSummary, personality, motivation, speechStyle, ...identity }) => ({ ...identity, ...(visualSummary ? { visualSummary } : {}), ...(personality || motivation || speechStyle ? { personality, motivation, speechStyle } : {}), ...(refs.length ? { refs } : {}), ...(artDirection ? { artDirection } : {}), ...(designView !== "sheet" ? { designView } : {}) })),
     ...(previous?.image ? { previousImage: previous.image } : !previous && episode.continuityImage ? { previousImage: episode.continuityImage } : {}),
   });
 }
@@ -282,18 +286,52 @@ export function splitDialogue(panel: Panel, cast: Character[]): Speech[] {
   return [...dialogue, ...other];
 }
 
-export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">) {
+export function characterVisual(character: Character) {
+  if (character.visualSummary.trim()) return character.visualSummary.trim();
+  const analysis = character.referenceAnalysis;
+  const facts = analysis.match(/(?:保留核心识别元素|核心识别|新图应保留)[：:]([^。\n]+)/)?.[1] || analysis.match(/角色为([^。\n]+)/)?.[1];
+  return facts || character.description || analysis;
+}
+
+export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">, local = false) {
+  if (local) {
+    const views = { sheet: "同一个角色的正面全身、侧面和面部特写三种视角，纯色背景", turnaround: "同一个角色的正面、侧面、背面全身三视图，纯色背景", expressions: "同一张脸的六种表情：平静、开心、惊讶、担心、生气、困倦", portrait: "单个人物半身头像，仅一个视角", fullBody: "单个人物全身立绘，仅一个视角，脚部完整" };
+    return `${views[character.designView]}。${characterVisual(character).slice(0, 260)}。当前设计要求：${character.description.slice(0, 140)}。性格表现：${character.personality.slice(0, 60)}。画风：${style.description.split(/\n/)[0]?.slice(0, 80)}；${character.artDirection.slice(0, 70)}。保持每个视角的发型、脸部与服装相同，衣服和背景为干净无字表面，画面只呈现人物造型。当前输出视图优先于旧分析中的构图和姿势建议。`;
+  }
   const views = { turnaround: "One character turnaround sheet with full-body front, side and back views of exactly the same character and outfit.", expressions: "One expression reference sheet: the same character face in six expressions (neutral, happy, surprised, worried, angry, sleepy), stable hairstyle and facial features.", sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
   const intent = { redesign: "Extract distinctive elements AND the visual style, then design a NEW original character. For a logo, object or animal, reinterpret its colours, silhouette and motifs into the requested person or mascot. Do NOT reproduce the input image, layout, collage or original pose.", identity: "Preserve the referenced character identity and outfit; create the requested new views or pose rather than duplicating the original image.", style: "Use ONLY linework, palette, shading and proportions from the reference; invent a new identity from the user's description. Do not copy the original character or composition." };
-  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nPersonality to convey through visual attitude: ${character.personality}. Motivation: ${character.motivation}\nReviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
+  return `Design ONE original named character (person, animal or mascot as described), no text, no lettering, no logo. ${views[character.designView]} Plain light background. ${intent[character.referenceIntent]}\nName: ${character.name}\nUser's everyday description: ${character.description}\nPersonality to convey through visual attitude: ${character.personality}. Motivation: ${character.motivation}\nVisual identity: ${characterVisual(character)}\nReference analysis is source material only; current user description, selected output views, personality and art direction override any old layout/pose suggestions or IP/name commentary. Reviewed visual analysis: ${character.referenceAnalysis}\nCharacter reference instructions: ${character.refs.map((item) => item.note).filter(Boolean).join("; ")}\nArt direction: ${character.artDirection || style.description}\nAvoid: ${style.avoid}\nKeep the newly designed hairstyle, face shape, outfit colours and distinctive accessories consistent across all views. Do not add unrelated characters.`;
 }
 
 export function referenceReady(target: { refs: { path: string }[]; referenceIntent: string; referenceAnalysis: string; analysisFingerprint: string }) {
   return !target.refs.length || target.referenceIntent === "identity" || !!target.referenceAnalysis.trim() && target.analysisFingerprint === JSON.stringify(target.refs.map((item) => item.path));
 }
 
-export function imagePrompt(episode: Episode, panel: Panel, useReferences = true, referenceIsCurrent = false, referenceOverride = "") {
+export function scriptRoleNames(episode: Episode) {
+  const bindings = new Map<string, string>();
+  const speakers = new Set<string>();
+  for (const panel of episode.panels) {
+    const names = [...new Set(panel.dialogue.split("\n").map((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name))];
+    names.forEach((name) => speakers.add(name));
+    if (panel.characters.length === 1 && names.length === 1) bindings.set(panel.characters[0]!, names[0]!);
+  }
+  for (const person of episode.castSnapshot) for (const name of speakers) if ([person.name, ...person.aliases.split(/[,，、\n]/)].some((alias) => alias.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) bindings.set(person.id, name);
+  const remainingRoles = episode.castSnapshot.filter((item) => !bindings.has(item.id));
+  const remainingNames = [...speakers].filter((name) => ![...bindings.values()].includes(name));
+  // ACT: 仅唯一剩余的一对做排除匹配；多人歧义保留用户的角色ID绑定，不猜测。
+  if (remainingRoles.length === 1 && remainingNames.length === 1) bindings.set(remainingRoles[0]!.id, remainingNames[0]!);
+  return bindings;
+}
+
+export function imagePrompt(episode: Episode, panel: Panel, useReferences = true, referenceIsCurrent = false, referenceOverride = "", local = false) {
   const cast = episode.castSnapshot.filter((item) => panel.characters.includes(item.id));
+  if (panel.imagePromptOverride.trim()) return panel.imagePromptOverride.trim();
+  if (local) {
+    const names = scriptRoleNames(episode);
+    const roles = cast.map((person, index) => `人物${index + 1}${names.has(person.id) ? `（剧情称呼${names.get(person.id)}）` : ""}：${characterVisual(person).slice(0, cast.length > 1 ? 135 : 210)}；性格${person.personality.slice(0, 30)}`);
+    const acting = panel.performances.filter((item) => panel.characters.includes(item.characterId)).map((item) => `人物${cast.findIndex((person) => person.id === item.characterId) + 1}：${item.emotion}，${item.expression}，${item.pose}`.slice(0, 125));
+    return [`一张完整的漫画剧情画面，一个连续场景，${cast.length}位不同人物各出现一次。`, `${panel.shot}。${panel.action.slice(0, 260)}`, panel.actionInstruction.slice(0, 100), ...roles, ...acting, `画风：${episode.styleSnapshot?.description.split(/\n/)[0]?.slice(0, 90) || '日式动漫'}。${panel.revisionRequest.slice(0, 100)}`, "仅绘制本格动作，人物离开设定图的静态站姿；服装、背景与道具保持干净无字表面，文字和气泡由软件另外排版。"].filter(Boolean).join("\n");
+  }
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
   return [
     "Draw one original comic panel, portrait 3:4 composition. No borders, speech bubbles, text, readable signs or watermarks. Leave simple space at the top for later lettering.",

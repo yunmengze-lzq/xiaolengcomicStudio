@@ -61,7 +61,7 @@ export default function useStudio() {
   const imageModel = ref("");
   const zImageQuality = ref(z.enum(["draft", "standard", "detail"]).catch("standard").parse(appSettings.value.comicZImageQuality));
   watch(zImageQuality, (value) => { appSettings.value.comicZImageQuality = value; });
-  const zImageReferenceMode = ref(z.enum(["text", "reference", "character"]).catch("character").parse(appSettings.value.comicZImageReferenceMode));
+  const zImageReferenceMode = ref(z.enum(["text", "reference"]).catch("text").parse(appSettings.value.comicZImageReferenceMode));
   const referenceAnalysisMode = ref(z.enum(["selected", "codex"]).catch("selected").parse(appSettings.value.comicReferenceAnalysisMode));
   watch(referenceAnalysisMode, (value) => { appSettings.value.comicReferenceAnalysisMode = value; });
   watch(zImageReferenceMode, (value) => { appSettings.value.comicZImageReferenceMode = value; });
@@ -837,14 +837,14 @@ export default function useStudio() {
     if (!model) throw new Error("请在创作设置中配置图片 API，或导出角色提示词交给 Codex 生成后导入");
     const targetDirectory = directory.value;
     if (character.refs.length && character.referenceIntent !== "identity" && (!character.referenceAnalysis || character.analysisFingerprint !== JSON.stringify(character.refs.map((item) => item.path)))) throw new Error("请先分析角色参考图，确认提取的元素与画风后再重新设计；本机不会把原图直接当作新角色");
-    const references = character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : model.providerId === "zImage" ? [] : [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : [])])];
-    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style), references);
+    const references = model.providerId === "zImage" ? [] : character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : [...new Set([...character.refs.map((item) => item.path), ...(!character.artDirection ? style.refs.map((item) => item.path) : [])])];
+    const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style, model.providerId === "zImage"), references);
     const path = data.data?.[0]?.path;
     if (data.code !== 200 || !path) throw new Error(data.message || "图片服务没有返回角色图");
     if (directory.value !== targetDirectory) return;
     character.designImages.push({ path, view: character.designView });
     if (!character.image) character.image = path;
-    project.value?.assets.push({ path, method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
+    project.value?.assets.push({ path, method: model.providerId === "zImage" ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style, model.providerId === "zImage"), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
     await ensureImage(path);
     await save();
   }
@@ -870,10 +870,11 @@ export default function useStudio() {
     const targetDirectory = directory.value;
     const paths = target.refs.map((item) => item.path);
     const mode = referenceAnalysisMode.value === "codex" ? "codex" : textMode.value;
-    const { data } = await axios.post("/api/comicStudio/referenceAnalysis", { directory: targetDirectory, mode, providerId: mode === "api" ? selected?.providerId : undefined, modelId: mode === "api" ? selected?.modelId : undefined, codexModel: codexModel.value || undefined, purpose, intent: target.referenceIntent, request: `${target.name}\n${target.description}\n${target.refs.map((item) => item.note).join("\n")}`.slice(0, 5000), paths }, { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 });
-    const result = z.object({ analysis: z.string().min(1).max(3000) }).parse(data.data);
+    const { data } = await axios.post("/api/comicStudio/referenceAnalysis", { directory: targetDirectory, mode, providerId: mode === "api" ? selected?.providerId : undefined, modelId: mode === "api" ? selected?.modelId : undefined, codexModel: codexModel.value || undefined, purpose, intent: target.referenceIntent, request: `${target.description}\n${"personality" in target ? `性格：${target.personality}；动机：${target.motivation}；画风：${target.artDirection}；输出视图：${target.designView}` : ""}\n全篇画风：${activeStyle.value?.description || ""}\n${target.refs.map((item) => item.note).join("\n")}`.slice(0, 5000), paths }, { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 });
+    const result = z.object({ analysis: z.string().min(1).max(3000), visualSummary: z.string().max(1000).optional() }).parse(data.data);
     if (directory.value !== targetDirectory || JSON.stringify(paths) !== JSON.stringify(target.refs.map((item) => item.path))) return;
     target.referenceAnalysis = result.analysis;
+    if ("visualSummary" in target && result.visualSummary) target.visualSummary = result.visualSummary;
     target.analysisFingerprint = JSON.stringify(paths);
     await save();
   }
@@ -899,14 +900,13 @@ export default function useStudio() {
     if (!current?.styleSnapshot) return "请先同步本期画风";
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model?.configured) return "请先选择已配置的生图服务";
-    let cast: Character[];
-    try { cast = current.castSnapshot.filter((item) => panel.characters.includes(item.id)).map((item) => matchingCharacter(item, project.value?.characters || []) || item); } catch (error) { return (error as Error).message; }
+    try { current.castSnapshot.filter((item) => panel.characters.includes(item.id)).forEach((item) => matchingCharacter(item, project.value?.characters || [])); } catch (error) { return (error as Error).message; }
     if (panel.characters.some((id) => !current.castSnapshot.some((item) => item.id === id))) return "本格有未绑定角色，请到分镜设计选择角色";
-    if (cast.some((item) => !item.image)) return "请先为本格角色生成或导入正式图，再开始分格出图";
+
     if (model.providerId === "zImage") {
-      if (cast.length > 1) return "本格多角色同框：Z-Image 只有单图参考，请选择支持多参考的API或ComfyUI";
-      if (cast.length && zImageReferenceMode.value !== "character") return "固定人物需要选择‘固定角色参考’；文生图和旧图修订不传正式角色图";
-      if (!cast.length && zImageReferenceMode.value === "character") return "本格未选角色；纯环境画面请选择文生图，或先在分镜设计选择人物";
+
+
+
       if (zImageReferenceMode.value === "reference" && !panel.image) return "旧图修订需要已有图片；首次环境出图请选择文生图";
     }
     return "";
@@ -925,12 +925,8 @@ export default function useStudio() {
     if (localReference && !panel.image) throw new Error("本地图生图需要本格已有图片；首次出图请选择‘文生图 · 本格动作优先’");
     generationProgress.panelId = panel.id;
     const fingerprint = imageInput(current, panel);
-    const localCharacter = model.providerId === "zImage" && zImageReferenceMode.value === "character";
-    const cast = current.castSnapshot.filter((item) => panel.characters.includes(item.id));
-    if (localCharacter && (cast.length !== 1 || !cast[0]?.image)) throw new Error("本机角色参考只支持一位已有正式设定图的角色；多角色同框请选择支持多参考图的API或ComfyUI工作流");
-    const override = localCharacter ? `The only reference is the canonical character design for ${cast[0]!.name}. Preserve identity, hairstyle, outfit and species. Render ONLY the new action and scene described below; do not reproduce the design-sheet layout or its static pose.` : "";
-    const generationPrompt = imagePrompt(current, panel, model.providerId !== "zImage" || localReference || localCharacter, localReference, override);
-    const references = model.providerId === "zImage" ? (localReference ? [panel.image] : localCharacter ? [cast[0]!.image] : []) : referencePaths(current, panel);
+    const generationPrompt = imagePrompt(current, panel, model.providerId !== "zImage" || localReference, localReference, "", model.providerId === "zImage");
+    const references = model.providerId === "zImage" ? (localReference ? [panel.image] : []) : referencePaths(current, panel);
     const { data } = await requestImage(model, targetDirectory, generationPrompt, references);
     if (data.code !== 200 || !data.data?.[0]?.path) throw new Error(data.message || "图片服务没有返回可用图片");
     if (directory.value !== targetDirectory) return;
