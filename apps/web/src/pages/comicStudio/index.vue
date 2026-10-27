@@ -361,6 +361,8 @@
                     <textarea :id="`dialogue${index}`" v-model="panel.dialogue" @input="panel.speech = splitDialogue(panel, episode.castSnapshot)" rows="3" maxlength="600"></textarea>
                     <label :for="`caption${index}`">旁白</label>
                     <textarea :id="`caption${index}`" v-model="panel.caption" rows="2" maxlength="300"></textarea>
+                    <label :for="`sfx${index}`">拟声词 / 音效字</label>
+                    <input :id="`sfx${index}`" v-model="panel.sfx" maxlength="40" placeholder="叮—— / 咚咚 / 喵" />
                   </div>
                 </article>
               </div>
@@ -404,7 +406,7 @@
                     <span v-if="project.activeStyleId === style.id" class="statusTag">新作品默认</span>
                   </button>
                 </div>
-                <details class="styleDraft"><summary>自定义画风 · 上传参考与生成样张</summary>
+                <details class="styleDraft" open><summary>自定义画风 · 参考图为主，文字只补充感觉</summary>
                   <div class="twoFields">
                     <div>
                       <label for="styleName">版本名称</label>
@@ -442,9 +444,9 @@
                       <input type="file" accept="image/png,image/jpeg,image/webp" multiple @change="addStyleReferences" />
                     </label>
                   </div>
-                  <button class="secondaryButton" :disabled="!styleDraft.refs.length" @click="run('分析画风参考图', () => analyzeReferences(styleDraft, 'style'))">1 · 分析参考图</button><label for="styleAnalysis">提取的元素与画风 · 可修改</label><textarea id="styleAnalysis" v-model="styleDraft.referenceAnalysis" rows="4" maxlength="3000" placeholder="点击分析后显示提取结果；确认后再生成。"></textarea>
-                  <button class="secondaryButton" :disabled="!imageModel || !referenceReady(styleDraft)" @click="run('生成自定义画风样张', generateStylePreview)">根据描述与参考图生成画风样张</button>
-                  <p class="helperText">分析需支持识图的文本模型或 Codex，点击才调用。Z-Image 重新设计和纯画风模式使用分析文字文生图，避免沿用原图构图；保持角色模式才用普通图生图，效果仍需审核。</p>
+                  <button class="secondaryButton" :disabled="!styleDraft.refs.length" @click="run('分析画风参考图', () => analyzeReferences(styleDraft, 'style'))">可选 · 分析参考图（不分析也可直接生成）</button><label for="styleAnalysis">提取的元素与画风 · 可修改（辅助说明）</label><textarea id="styleAnalysis" v-model="styleDraft.referenceAnalysis" rows="4" maxlength="3000" placeholder="可选：分析后显示提取结果，方便检查；参考图仍会直接参与生成。"></textarea>
+                  <button class="secondaryButton" :disabled="!imageModel || !referenceReady(styleDraft)" @click="run('生成自定义画风样张', generateStylePreview)">根据参考图与描述生成画风样张</button>
+                  <p class="helperText">图像为主：参考图会直接作为生图条件；文字只补充“想要什么感觉”。分析是可选辅助，不再是生成前必须通过的步骤。Z-Image 纯文字路径会丢弃部分参考图，需单独确认。</p>
                   <button class="primaryButton" @click="run('保存新美术版本', publishDraft)">
                     <icon-stack-2 :size="16" />
                     保存为新版本
@@ -460,7 +462,7 @@
                     新增角色
                   </button>
                 </div>
-                <p class="helperText">每个角色只维护一份档案。性格与说话方式交给编剧，正式角色图交给生图模型；本地可用文字设定绘制多人场景；多参考图片与身份约束取决于所选服务。</p>
+                <p class="helperText">图像为主：先上传/选择参考图，文字只补充身份、服装和画风。每个角色只维护一份档案；正式角色图交给生图模型，多参考与身份约束取决于所选服务。</p>
                 <div class="characterPicker" aria-label="选择编辑角色"><button v-for="person in project.characters" :key="person.id" :class="{ selected: selectedCharacterId === person.id || !selectedCharacterId && person.id === project?.characters[0]?.id }" @click="selectedCharacterId = person.id"><img v-if="person.image" :src="imageUrls[person.image]" alt="" /><span>{{ person.name }}</span><small>{{ person.image ? '已有正式图' : '待设置形象' }}</small></button></div>
                 <div class="characterGrid">
                   <article v-for="character in project.characters.filter((item) => item.id === selectedCharacterId || !selectedCharacterId && item.id === project?.characters[0]?.id)" :key="character.id" class="characterCard">
@@ -484,15 +486,15 @@
                     <label :for="`${character.id}Aliases`">剧情里的别名 · 逗号分隔，自动匹配</label><input :id="`${character.id}Aliases`" v-model="character.aliases" maxlength="500" placeholder="例如：小D，DeepSeek娘" />
                     <div class="twoFields"><div><label :for="`${character.id}Personality`">性格与习惯</label><textarea :id="`${character.id}Personality`" v-model="character.personality" rows="3" maxlength="1500" placeholder="例如：外冷内热，紧张时嘴硬，习惯先观察再行动"></textarea></div><div><label :for="`${character.id}Motivation`">动机与在意的事</label><textarea :id="`${character.id}Motivation`" v-model="character.motivation" rows="3" maxlength="1000" placeholder="例如：想被认可，但不愿轻易示弱"></textarea></div></div>
                     <label :for="`${character.id}Speech`">说话方式 · 用于对白和心理描写</label><textarea :id="`${character.id}Speech`" v-model="character.speechStyle" rows="2" maxlength="1000" placeholder="例如：短句、冷幽默；心里吐槽，嘴上克制"></textarea>
-                    <details class="characterDesign"><summary>设计与更新形象 · 参考图 → 分析 → 生成</summary>
+                    <details class="characterDesign" open><summary>参考图为主 · 上传后直接生成；文字只补充设定</summary>
                     <button v-if="character.image && !character.refs.some((item) => item.path === character.image)" class="secondaryButton" @click="run('将已有图用作参考', async () => { if (character.refs.length >= 12) throw new Error('请先移除不需要的参考图'); character.refs.push({ id: newTopicId(), path: character.image, source: '已有角色图', note: '提取元素与画风，按新要求设计角色', license: '' }); await save(); })">将上图作为设计参考 · 不重复保存文件</button>
                     <label :for="`${character.id}Intent`">参考图怎么用？</label><select :id="`${character.id}Intent`" v-model="character.referenceIntent"><option value="redesign">提取元素与画风 · 重新设计我的角色</option><option value="identity">保持角色 · 新动作与新视角</option><option value="style">只参考画风 · 新角色身份</option></select><label :for="`${character.id}Art`">想要的画风</label><select :id="`${character.id}Art`" v-model="character.artDirection"><option value="">跟随当前默认画风</option><option value="原创二次元动漫人物，清晰线条、柔和配色、稳定五官与服装细节">二次元动漫</option><option value="原创Q版可爱人物，圆润比例、清晰轮廓、明快配色">Q版可爱</option><option value="原创水彩绘本，柔和纸纹和浅色晕染，人物特征清晰">柔和绘本</option></select>
                     <label :for="`${character.id}View`">这次生成什么？</label><select :id="`${character.id}View`" v-model="character.designView"><option value="sheet">角色设定图 · 正面、侧面和脸部特写</option><option value="turnaround">角色三视图 · 正面、侧面、背面</option><option value="expressions">表情参考图 · 六种表情</option><option value="fullBody">全身立绘 · 看清服装与造型</option><option value="portrait">头像 · 看清脸部特征</option></select>
                     <label>复用素材库图片<select @change="reuseReference($event, character.refs)"><option value="">从本空间素材库选择，不重复保存文件</option><option v-for="asset in project.assets.filter((item) => !item.trashedAt)" :key="asset.path" :value="asset.path">{{ asset.source || '本机图片' }} · {{ asset.path }}</option></select></label>
                     <div class="referenceGrid"><figure v-for="reference in character.refs" :key="reference.id"><img :src="imageUrls[reference.path]" :alt="`${character.name}的生成参考图`" /><input v-model="reference.note" aria-label="角色参考图特点" placeholder="想保留什么？如发型、衣服、配色" /><input v-model="reference.source" aria-label="角色参考图来源" placeholder="来源或作者（自己审核用）" /><button class="textButton" @click="character.refs = character.refs.filter((item) => item.id !== reference.id)">移除此参考</button></figure><label class="uploadTile" tabindex="0" role="button" @keydown.enter.prevent="activateUpload" @keydown.space.prevent="activateUpload"><icon-photo-plus :size="24" /><span>添加生成参考图</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple :aria-label="`添加${character.name}参考图`" @change="addCharacterReferences($event, character)" /></label></div>
-                    <button class="secondaryButton" :disabled="!character.refs.length" @click="run('分析角色参考图', () => analyzeReferences(character, 'character'))">1 · 分析参考图</button><label :for="`${character.id}Analysis`">图片提取与角色设计说明 · 可修改</label><textarea :id="`${character.id}Analysis`" v-model="character.referenceAnalysis" rows="4" maxlength="3000" placeholder="分析后先检查保留元素、画风和新的角色设计，再生成。"></textarea>
-                    <p class="helperText">本地角色设计使用外形摘要、当前画风、性格和所选视图重新绘制，不混合原图像素，避免继承原图分栏。参考图用于分析；本地身份一致性仍需审核。</p>
-                    <details><summary>查看实际角色生成提示词</summary><pre>{{ characterPrompt(character, project.styles.find((item) => item.id === project?.activeStyleId) || { description: '', avoid: '' }, imageModel === 'zImage/turbo4bit') }}</pre></details><div class="panelActions"><button class="primaryButton" :disabled="!!busy || !imageModel || !referenceReady(character)" @click="run('生成角色设定图', () => generateCharacter(character))">2 · 生成角色设计</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div></details>
+                    <button class="secondaryButton" :disabled="!character.refs.length" @click="run('分析角色参考图', () => analyzeReferences(character, 'character'))">可选 · 分析参考图（不分析也可直接生成）</button><label :for="`${character.id}Analysis`">图片提取与角色设计说明 · 可修改（辅助说明）</label><textarea :id="`${character.id}Analysis`" v-model="character.referenceAnalysis" rows="4" maxlength="3000" placeholder="可选：分析后显示保留元素、画风和设计说明；参考图仍会直接参与生成。"></textarea>
+                    <p class="helperText">图像为主：参考图直接作为生成条件；文字只补充身份、动作和画风要求。分析是可选辅助，不再是生成前必须通过的步骤。</p>
+                    <details><summary>查看实际角色生成提示词</summary><pre>{{ characterPrompt(character, project.styles.find((item) => item.id === project?.activeStyleId) || { description: '', avoid: '' }, imageModel === 'zImage/turbo4bit') }}</pre></details><div class="panelActions"><button class="primaryButton" :disabled="!!busy || !imageModel || !referenceReady(character)" @click="run('生成角色设定图', () => generateCharacter(character))">直接生成角色设计 · 图像为主</button><button class="secondaryButton" @click="run('导出角色提示词', () => exportCharacter(character))">导出 Codex 角色包</button></div></details>
                   </article>
                 </div>
               </div>
@@ -599,6 +601,7 @@
                   <div><label for="textMode">文字位置</label><select id="textMode" v-model="episode.layout.textMode"><option value="overlay">漫画气泡 · 拖动定位</option><option value="safe">画外留白 · 不遮人物</option></select></div>
                   <div><label for="fontSize">文字字号：{{ episode.layout.fontSize }} px</label><input id="fontSize" v-model.number="episode.layout.fontSize" type="range" min="20" max="60" /></div>
                   <div><label for="pageBackground">页面底色</label><input id="pageBackground" v-model="episode.layout.background" type="color" /></div>
+                  <div class="flavorToggle"><label for="comicFlavor"><input id="comicFlavor" v-model="episode.layout.comicFlavor" type="checkbox" /> 漫画质感 · 网点、拟声词、页码</label></div>
                 </div>
                 <p class="helperText">输出 1080 × 1440 PNG。文字独立排版，修改对白无需重新出图。</p>
                 <button class="primaryButton" @click="run('生成排版预览', preview)">
@@ -619,6 +622,10 @@
                       <div>
                         <label :for="`letterCaption${index}`">旁白</label>
                         <textarea :id="`letterCaption${index}`" v-model="panel.caption" rows="2" maxlength="300"></textarea>
+                      </div>
+                      <div>
+                        <label :for="`letterSfx${index}`">拟声词 / 音效字</label>
+                        <input :id="`letterSfx${index}`" v-model="panel.sfx" maxlength="40" placeholder="叮—— / 咚咚 / 喵" />
                       </div>
                     </div>
                     <letteringEditor :panel="panel" :cast="episode.castSnapshot" :imageUrl="imageUrls[panel.image]" :textMode="episode.layout.textMode" :fontFamily="episode.layout.fontFamily" />
@@ -2044,6 +2051,9 @@ onMounted(() => {
       border: 1px solid var(--studioLine);
       padding: 16px;
       border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      > .characterDesign { order: -1; }
     }
     .characterImage {
       height: 180px;
@@ -2177,6 +2187,7 @@ onMounted(() => {
     .layoutControls {
       align-self: start;
       .layoutControlGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 18px; label { margin-top: 0; } }
+      .flavorToggle { display: flex; align-items: end; label { display: flex; align-items: center; gap: 8px; min-height: 38px; } input { width: auto; } }
       > button {
         margin-top: 12px;
       }

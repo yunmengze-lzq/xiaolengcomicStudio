@@ -374,10 +374,8 @@ export default function useStudio() {
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model?.configured) throw new Error("请在创作设置选择已配置的图片模型");
     const targetDirectory = directory.value;
-    const requiresAnalysis = draft.refs.length && draft.referenceIntent !== "identity";
-    if (requiresAnalysis && (!draft.referenceAnalysis || draft.analysisFingerprint !== JSON.stringify(draft.refs.map((item) => item.path)))) throw new Error("请先分析参考图，检查提取的元素与画风，再生成新样张；参考图已变动时需要重新分析");
     const intent = { redesign: "提取参考图元素与画风，重新设计原创人物和新场景，不复制原图构图或拼贴原图", identity: "保持参考角色的身份和服装，用用户要求的画风绘制一个新镜头，不复制原姿势", style: "只参考线条、配色、上色和人物比例，人物身份和场景重新设计，不照搬参考图的人物" };
-    const prompt = `创作一张新的原创漫画画风样张，清楚展示人物、服装、线条、上色与背景，不要文字。参考方式：${intent[draft.referenceIntent]}。用户要求：${draft.description}。经审核的图片分析：${draft.referenceAnalysis}。参考特点：${draft.refs.map((item) => item.note).filter(Boolean).join("；")}。避免：${draft.avoid}`;
+    const prompt = `创作一张新的原创漫画画风样张，清楚展示人物、服装、线条、上色与背景，不要文字。参考方式：${intent[draft.referenceIntent]}。用户要求：${draft.description}。图片分析（可选，仅作补充）：${draft.referenceAnalysis}。参考特点：${draft.refs.map((item) => item.note).filter(Boolean).join("；")}。避免：${draft.avoid}`;
     const references = model.providerId === "zImage" && draft.referenceIntent !== "identity" ? [] : draft.refs.map((item) => item.path);
     const { data } = await requestImage(model, targetDirectory, prompt, references);
     if (!data.data?.[0]?.path) throw new Error("图片模型没有返回画风样张");
@@ -837,7 +835,6 @@ export default function useStudio() {
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model) throw new Error("请在创作设置中配置图片 API，或导出角色提示词交给 Codex 生成后导入");
     const targetDirectory = directory.value;
-    if (character.refs.length && character.referenceIntent !== "identity" && (!character.referenceAnalysis || character.analysisFingerprint !== JSON.stringify(character.refs.map((item) => item.path)))) throw new Error("请先分析角色参考图，确认提取的元素与画风后再重新设计；本机不会把原图直接当作新角色");
     const references = model.providerId === "zImage" ? [] : character.referenceIntent === "identity" ? [character.image || character.refs[0]?.path].filter((path): path is string => !!path) : [...new Set([...character.refs.map((item) => item.path), ...style.refs.map((item) => item.path)])];
     const { data } = await requestImage(model, targetDirectory, characterPrompt(character, style, ["zImage", "fluxKlein"].includes(model.providerId)), references);
     const path = data.data?.[0]?.path;
@@ -887,11 +884,21 @@ export default function useStudio() {
     clearInterval(generationTimer);
     const started = Date.now();
     generationTimer = setInterval(() => { generationProgress.elapsedSeconds = Math.floor((Date.now() - started) / 1000); }, 1000);
-    const response = await axios.post(["zImage", "fluxKlein"].includes(model.providerId) ? "/api/comicStudio/zImage" : model.providerId === "codex" ? "/api/comicStudio/image" : "/api/ai/media/generate", {
-      directory: targetDirectory, mediaType: "image", providerId: model.providerId, modelId: model.modelId,
-      codexModel: codexModel.value, quality: zImageQuality.value, prompt, ratio: "3:4", outputDirectory: "assets",
+    const local = ["zImage", "fluxKlein"].includes(model.providerId);
+    const endpoint = local ? "/api/comicStudio/zImage" : model.providerId === "codex" ? "/api/comicStudio/image" : "/api/ai/media/generate";
+    const payload = {
+      directory: targetDirectory,
+      mediaType: "image",
+      providerId: model.providerId,
+      modelId: model.modelId,
+      prompt,
+      ratio: "3:4",
+      outputDirectory: "assets",
       images: references.map((path) => ({ path, mimeType: path.endsWith(".jpg") ? "image/jpeg" : path.endsWith(".webp") ? "image/webp" : "image/png" })),
-    }, { headers: { "x-toonflow-workspace": "1" }, timeout: ["zImage", "fluxKlein"].includes(model.providerId) ? 920000 : model.providerId === "codex" ? 500000 : 300000 });
+      ...(local ? { quality: zImageQuality.value } : {}),
+      ...(model.providerId === "codex" ? { codexModel: codexModel.value } : {}),
+    };
+    const response = await axios.post(endpoint, payload, { headers: { "x-toonflow-workspace": "1" }, timeout: local ? 920000 : model.providerId === "codex" ? 500000 : 300000 });
     generationProgress.phase = "保存图片与版本";
     return response;
   }

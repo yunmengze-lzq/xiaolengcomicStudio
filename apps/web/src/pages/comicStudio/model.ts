@@ -64,6 +64,7 @@ const panelSchema = z.object({
   candidate: z.object({ path: assetPath, fingerprint: z.string().max(1000000) }).nullable().default(null),
   dialogue: z.string().max(5000),
   caption: z.string().max(300),
+  sfx: z.string().max(40).default(""),
   characters: z.array(id).max(20),
   image: z.union([assetPath, z.literal("")]),
   history: z.array(assetPath).max(200),
@@ -80,6 +81,7 @@ const layoutSchema = z.object({
   background: z.string().regex(/^#[a-fA-F0-9]{6}$/),
   fontFamily: z.enum(["sans", "wenkai", "serif", "genkiGothic", "huninn", "genkiMin"]).default("sans"),
   textMode: z.enum(["overlay", "safe"]).default("overlay"),
+  comicFlavor: z.boolean().default(true),
 });
 const episodeSchema = z.object({
   id,
@@ -173,6 +175,7 @@ export function newPanel(): Panel {
     candidate: null,
     dialogue: "",
     caption: "",
+    sfx: "",
     characters: [],
     image: "",
     history: [],
@@ -201,7 +204,7 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
     styleSnapshot: style ? JSON.parse(JSON.stringify(style)) : null,
     castSnapshot: JSON.parse(JSON.stringify(project.characters)),
     panels: [],
-    layout: { perPage: 4, fontSize: 30, background: "#ffffff", fontFamily: "wenkai", textMode: "overlay" },
+    layout: { perPage: 4, fontSize: 30, background: "#ffffff", fontFamily: "wenkai", textMode: "overlay", comicFlavor: true },
     postText: "",
     postStyle: "简单有梗",
     postCandidate: "",
@@ -249,6 +252,7 @@ export function reviewInput(episode: Episode, panel: Panel) {
     image: panel.image,
     dialogue: panel.dialogue,
     caption: panel.caption,
+    sfx: panel.sfx,
     bubbleX: panel.bubbleX,
     bubbleY: panel.bubbleY,
     layout: {
@@ -257,6 +261,7 @@ export function reviewInput(episode: Episode, panel: Panel) {
       background: episode.layout.background,
       ...(episode.layout.fontFamily !== "sans" ? { fontFamily: episode.layout.fontFamily } : {}),
       ...(episode.layout.textMode !== "overlay" ? { textMode: episode.layout.textMode } : {}),
+      ...(episode.layout.comicFlavor === false ? { comicFlavor: false } : {}),
     },
     ...(panel.speech.length ? { speech: panel.speech } : {}),
     topic: episode.topic,
@@ -304,7 +309,9 @@ export function characterPrompt(character: Character, style: Pick<ArtStyle, "des
 }
 
 export function referenceReady(target: { refs: { path: string }[]; referenceIntent: string; referenceAnalysis: string; analysisFingerprint: string }) {
-  return !target.refs.length || target.referenceIntent === "identity" || !!target.referenceAnalysis.trim() && target.analysisFingerprint === JSON.stringify(target.refs.map((item) => item.path));
+  // 图像为主：参考图可以直接作为生成条件，文字分析只用于可读说明，不再作为前置门槛。
+  void target;
+  return true;
 }
 
 export function scriptRoleNames(episode: Episode) {

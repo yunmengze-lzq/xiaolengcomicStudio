@@ -24,6 +24,9 @@ Thumbs.db
 .env.*
 !.env.example
 /apps/updateServer/build/
+/output/
+/deploy/
+/start.ps1
 .vscode
 *.p12
 *.pfx
