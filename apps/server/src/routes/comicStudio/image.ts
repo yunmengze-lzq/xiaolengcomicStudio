@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { mkdir, mkdtemp, readdir, readFile, stat, realpath, writeFile } from "@toonflow/file";
 import { z } from "zod";
 import u from "@/utils";
+import { codexCommand } from "@/utils/comicStudio/codexCommand";
 import conf from "@/utils/conf";
 import { validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
@@ -42,10 +43,11 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
     const root = resolve(dirname(conf.path), "comicJobs");
     await mkdir(root, { recursive: true });
     const job = await mkdtemp(resolve(root, "image"));
-    const environment = await cliEnvironment();
+    const command = await codexCommand();
+    const environment = { ...await cliEnvironment(), PATH: command.environment.PATH };
     let threadId = "";
     await new Promise<void>((done, reject) => {
-      const child = spawn(process.env.COMIC_CODEX_BIN || "codex", [
+      const child = spawn(command.binary, [
         "exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check",
         "--disable", "shell_tool", "--model", input.codexModel,
         "--config", 'model_reasoning_effort="low"', "--cd", job, "--json", "--color", "never",

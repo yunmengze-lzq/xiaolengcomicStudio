@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { dirname, resolve } from "node:path";
 import { mkdir, mkdtemp, readFile, writeFile } from "@toonflow/file";
 import { z } from "zod";
+import { codexCommand } from "./codexCommand";
 import conf from "@/utils/conf";
 import { getConfiguredModel, streamAi } from "@/utils/ai";
 
@@ -121,10 +122,11 @@ export async function createStructured<T>(
     const schemaFile = resolve(job, "schema.json");
     const resultFile = resolve(job, "result.json");
     await writeFile(schemaFile, JSON.stringify(z.toJSONSchema(outputSchema)), { flag: "wx", mode: 0o600 });
-    const environment = await cliEnvironment();
+    const command = await codexCommand();
+    const environment = { ...await cliEnvironment(), PATH: command.environment.PATH };
     await new Promise<void>((done, reject) => {
       const child = spawn(
-        process.env.COMIC_CODEX_BIN || "codex",
+        command.binary,
         [
           "exec",
           "--sandbox",

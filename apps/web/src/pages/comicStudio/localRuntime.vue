@@ -18,10 +18,10 @@ const working = ref("");
 async function probeCodex() {
   working.value = "codex";
   try {
-    const { data } = await axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 12000 });
+    const { data } = await axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 25000 });
     const status = data.data;
     codexReady.value = !!(status.available && status.loggedIn && status.imageGeneration);
-    codexMessage.value = !status.available ? "未检测到 Codex CLI" : !status.loggedIn ? "Codex CLI 已安装但未登录" : status.imageGeneration ? `Codex ${status.version || ""} 已登录；feature flag 已开启。请先做单格测试，Windows 上可能仍缺 image_gen 工具。` : "Codex 已登录，但当前 CLI 没有开启 image_generation。";
+    codexMessage.value = !status.available ? status.message || "未检测到 Codex CLI" : !status.loggedIn ? "Codex CLI 已安装但未登录" : status.imageGeneration ? `Codex ${status.version || ""} 已登录；feature flag 已开启。请先做单格测试，Windows 上可能仍缺 image_gen 工具。` : "Codex 已登录，但当前 CLI 没有开启 image_generation。";
   } catch { codexMessage.value = "Codex 状态读取失败，请确认本机 CLI 可用"; }
   finally { working.value = ""; }
 }

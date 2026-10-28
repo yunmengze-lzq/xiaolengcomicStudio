@@ -136,7 +136,7 @@ export default function useStudio() {
       previewUrls.value.forEach(URL.revokeObjectURL);
       previewUrls.value = [];
       previewMessage.value = "";
-      if (stage.value !== 5 || !episode.value?.panels.length || episode.value.panels.some((panel) => !panel.image)) return;
+      if (![5, 6].includes(stage.value) || !episode.value?.panels.length || episode.value.panels.some((panel) => !panel.image)) return;
       previewTimer = setTimeout(() => {
         void preview().catch((error) => { previewMessage.value = error instanceof Error ? error.message : "排版预览失败"; });
       }, 400);
@@ -413,16 +413,19 @@ export default function useStudio() {
     await openProject(data.data.directory);
   }
 
+  let modelLoadVersion = 0;
   async function loadModels() {
-    const results = await Promise.allSettled([axios.get("/api/ai/models"), axios.get("/api/ai/media/models"), axios.get("/api/providers/media/list"), axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 8000 }), axios.get("/api/comicStudio/zImageStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 8000 })]);
+    const version = ++modelLoadVersion;
+    const results = await Promise.allSettled([axios.get("/api/ai/models"), axios.get("/api/ai/media/models"), axios.get("/api/providers/media/list"), axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }), axios.get("/api/comicStudio/zImageStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 8000 })]);
+    if (version !== modelLoadVersion) return;
     if (results[0].status === "fulfilled") textModels.value = results[0].value.data.data;
     if (results[1].status === "fulfilled") {
-      const metadata = results[2].status === "fulfilled" ? z.array(z.object({ id: z.string(), rules: z.array(z.object({ field: z.string() })).optional() })).safeParse(results[2].value.data.data) : undefined;
+      const metadata = results[2].status === "fulfilled" ? z.array(z.object({ id: z.string(), rules: z.array(z.object({ field: z.string().optional() })).optional() })).safeParse(results[2].value.data.data) : undefined;
       const configurations = appSettings.value.mediaProviderConfigs as Record<string, { apiKey?: string; workflow?: string; baseUrl?: string; modelId?: string }> | undefined;
       imageModels.value = results[1].value.data.data.filter((item: Model) => item.type === "image").map((item: Model) => {
         const provider = metadata?.success ? metadata.data.find((entry) => entry.id === item.providerId) : undefined;
         const configured = item.providerId === "imageApi" ? !!configurations?.imageApi?.apiKey?.trim() && !!configurations?.imageApi?.baseUrl?.trim() && !!configurations?.imageApi?.modelId?.trim() : item.providerId === "comfyLocal" ? !!configurations?.comfyLocal?.workflow?.trim() : !!provider && (!provider.rules?.some((rule) => rule.field === "apiKey") || !!configurations?.[item.providerId]?.apiKey?.trim());
-        return { ...item, configured, label: configured ? (item.providerId === "imageApi" ? `在线API · ${configurations?.imageApi?.modelId || item.label}` : item.label) : `${item.label}（未完成配置）` };
+        return { ...item, configured, label: configured ? (item.providerId === "imageApi" ? `在线API · ${configurations?.imageApi?.modelId || item.label}` : item.providerId === "comfyLocal" ? `本地 ComfyUI · ${item.label}（工作流已保存）` : item.label) : `${item.label}（未完成配置）` };
       });
     }
     const cli = results[3].status === "fulfilled" ? results[3].value.data.data : undefined;
@@ -431,12 +434,24 @@ export default function useStudio() {
     if (localImage?.installed && localImage.modelReady) imageModels.value.push({ providerId: "zImage", modelId: "turbo4bit", label: "Z-Image Turbo · 本机 MLX", type: "image", configured: true });
     if (localImage?.fluxKlein?.installed && localImage.fluxKlein.modelReady) imageModels.value.push({ providerId: "fluxKlein", modelId: "klein4bit", label: "FLUX.2 klein · 本机多角色参考", type: "image", configured: true });
     if (cli?.available && cli.loggedIn && cli.imageGeneration) imageModels.value.push({ providerId: "codex", modelId: "imagegen", label: "Codex 内置生图 · 需联网", type: "image", configured: true });
-    if (textModel.value && !textModels.value.some((item) => `${item.providerId}/${item.modelId}` === textModel.value)) textModel.value = "";
-    if (imageModel.value && !imageModels.value.some((item) => item.configured && `${item.providerId}/${item.modelId}` === imageModel.value)) imageModel.value = "";
+
+    if (imageModel.value && !imageModels.value.some((item) => `${item.providerId}/${item.modelId}` === imageModel.value)) {
+      const slash = imageModel.value.indexOf("/");
+      const providerId = imageModel.value.slice(0, slash);
+      imageModels.value.push({ providerId, modelId: imageModel.value.slice(slash + 1), label: `${providerId === "comfyLocal" ? "ComfyUI" : imageModel.value}（此电脑未就绪，请检查配置与服务）`, configured: false, type: "image" });
+    }
     if (!textModel.value && textModels.value.length) textModel.value = `${textModels.value[0]!.providerId}/${textModels.value[0]!.modelId}`;
     const firstImageModel = imageModels.value.find((item) => item.configured);
     if (!imageModel.value && firstImageModel) imageModel.value = `${firstImageModel.providerId}/${firstImageModel.modelId}`;
   }
+
+  const refreshConfiguredModels = () => { void loadModels(); };
+  window.addEventListener("toonflow:provider-config-changed", refreshConfiguredModels);
+  window.addEventListener("toonflow:plugin-installed", refreshConfiguredModels);
+  onBeforeUnmount(() => {
+    window.removeEventListener("toonflow:provider-config-changed", refreshConfiguredModels);
+    window.removeEventListener("toonflow:plugin-installed", refreshConfiguredModels);
+  });
 
   async function discoverProjects() {
     const { data } = await axios.get("/api/workspaces/list", { headers: { "x-toonflow-workspace": "1" } });
@@ -1021,11 +1036,28 @@ export default function useStudio() {
     await save();
   }
 
+  async function analyzeLibrary(input: { directory: string; purpose: "character" | "style"; intent: "identity" | "redesign" | "style"; request: string; paths: string[] }) {
+    const mode = input.paths.length && referenceAnalysisMode.value === "codex" ? "codex" : textMode.value;
+    const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
+    if (mode === "api" && !selected) throw new Error("请在设置中选择文本模型；图片分析须使用支持识图的模型");
+    const { data } = await axios.post("/api/comicStudio/referenceAnalysis", { ...input, mode, providerId: selected?.providerId, modelId: selected?.modelId, codexModel: codexModel.value || undefined }, { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 });
+    return data.data;
+  }
+
+  async function exportImages() {
+    if (!episode.value?.panels.length || episode.value.panels.some((panel) => !panel.image)) throw new Error("请先补齐分格图片");
+    const pages = await renderPages(episode.value, files.value);
+    if (pages.length === 1) await saveFile(pages[0]!, "comicPage.png");
+    else {
+      const archive: Record<string, Uint8Array> = {};
+      for (let i = 0; i < pages.length; i++) archive[`page${i + 1}.png`] = new Uint8Array(await pages[i]!.arrayBuffer());
+      await saveFile(new Blob([zipSync(archive)]), "comicPages.zip");
+    }
+  }
+
   async function exportPackage() {
     const current = episode.value;
-    if (!current?.panels.length || approvedCount.value !== current.panels.length)
-      throw new Error("请先通过全部分格的审稿；修改图片、对白、美术或排版后需要重新审核");
-    if (!current.topic.verified) throw new Error("请先确认来源事实");
+    if (!current?.panels.length || current.panels.some((panel) => !panel.image)) throw new Error("请先补齐分格图片，再导出");
     const taskFiles = useWorkspaceFiles(directory.value);
     const pages = await renderPages(current, taskFiles);
     const archive: Record<string, Uint8Array> = {};
@@ -1163,6 +1195,8 @@ export default function useStudio() {
     exportCodexTask,
     preview,
     exportPackage,
+    exportImages,
+    analyzeLibrary,
     ensureImage,
   };
 }

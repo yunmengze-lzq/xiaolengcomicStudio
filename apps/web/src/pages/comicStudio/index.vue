@@ -128,7 +128,7 @@
             <button @click="stage = 1">{{ episode.story ? '✓' : '○' }} 故事脚本</button>
             <button @click="stage = 3">{{ episode.styleSnapshot ? '✓' : '○' }} 美术风格 · {{ episode.castSnapshot.length }} 位角色</button>
             <button @click="stage = 4">{{ episode.panels.filter((panel) => panel.image).length }} / {{ episode.panels.length }} 格出图</button>
-            <button @click="stage = 6">{{ approvedCount }} / {{ episode.panels.length }} 格审稿</button>
+            <button @click="stage = 6">整体效果预览</button>
           </div>
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
           <fieldset class="stageFields" :disabled="!!busy || saving">
@@ -359,6 +359,7 @@
                   <div class="storyboardDialogue">
                     <label :for="`dialogue${index}`">对白</label>
                     <textarea :id="`dialogue${index}`" v-model="panel.dialogue" @input="panel.speech = splitDialogue(panel, episode.castSnapshot)" rows="3" maxlength="600"></textarea>
+                    <div v-for="(speech, speechIndex) in panel.speech" :key="speechIndex"><label :for="`speaker${panel.id}${speechIndex}`">台词 {{ speechIndex + 1 }} · {{ speech.text }}</label><select :id="`speaker${panel.id}${speechIndex}`" v-model="speech.speakerId" @change="syncSpeechActor(panel, speechIndex)"><option value="">旁白 / 未指定</option><option v-for="person in episode.castSnapshot" :key="person.id" :value="person.id">{{ person.name }} · {{ person.personality.slice(0, 30) || '未设性格' }}</option></select></div>
                     <label :for="`caption${index}`">旁白</label>
                     <textarea :id="`caption${index}`" v-model="panel.caption" rows="2" maxlength="300"></textarea>
                     <label :for="`sfx${index}`">拟声词 / 音效字</label>
@@ -370,9 +371,9 @@
 
             <section v-else-if="stage === 3" class="assetsStage">
               <div class="artNavigation" role="tablist" aria-label="角色与美术工作区"><button role="tab" :aria-selected="artTab === 'characters'" :class="{ selected: artTab === 'characters' }" @click="artTab = 'characters'">1 · 角色档案</button><button role="tab" :aria-selected="artTab === 'styles'" :class="{ selected: artTab === 'styles' }" @click="artTab = 'styles'">2 · 全篇画风</button></div>
-              <p class="helperText">公共库保存可复用设定；点击“用于当前作品”才更新本期。修改或删除库内容不会自动改变已有作品。</p>
-              <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">当前文本模型 · 必须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
-              <artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" />
+              <p class="helperText">上方显示本篇选用；下方是可跨作品复用的公共库。保存档案后，可点击“更新本篇设定”同步修改。</p>
+              <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">{{ textServiceLabel }} · 须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
+              <artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
             </section>
 
             <section v-else-if="stage === 4 && episode">
@@ -381,7 +382,7 @@
                   <label for="imageModel">图片服务</label>
                   <select id="imageModel" v-model="imageModel">
                     <option value="">选择已配置的图片服务</option>
-                    <option v-for="model in imageModels.filter((item) => item.configured)" :disabled="!model.configured" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">
+                    <option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :disabled="!model.configured" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">
                       {{ model.label }}
                     </option>
                   </select>
@@ -501,46 +502,9 @@
             </section>
 
             <section v-else-if="stage === 6 && episode">
-              <div class="reviewSummary">
-                <div>
-                  <strong>
-                    {{ approvedCount }}
-                    <span>/ {{ episode.panels.length }}</span>
-                  </strong>
-                  <p>分格通过审阅</p>
-                </div>
-                <p>逐格检查事实、画面、人物和对白。修改图片、设定、文字或排版后，原审稿结果会失效。</p>
-                <button class="secondaryButton" @click="run('刷新成品预览', preview)">查看完整排版</button>
-              </div>
-              <div class="reviewList">
-                <article v-for="(panel, index) in episode.panels" :key="panel.id" class="surface reviewCard">
-                  <img v-if="panel.image" :src="imageUrls[panel.image]" :alt="`待审第 ${index + 1} 格`" />
-                  <div>
-                    <div class="sectionTitle">
-                      <h2>第 {{ index + 1 }} 格</h2>
-                      <span class="statusTag" :class="{ pending: !isApproved(episode, panel) }">
-                        {{ isApproved(episode, panel) ? "已通过" : "待审阅" }}
-                      </span>
-                    </div>
-                    <p>{{ panel.action }}</p>
-                    <blockquote>{{ panel.dialogue || panel.caption || "无文字" }}</blockquote>
-                    <label :for="`reviewNote${index}`">修改意见</label>
-                    <textarea :id="`reviewNote${index}`" v-model="panel.reviewNote" rows="2"></textarea>
-                    <div class="panelActions">
-                      <button
-                        class="primaryButton"
-                        :disabled="!panel.image || panel.generationFingerprint !== imageInput(episode, panel) || !episode.topic.verified"
-                        @click="approvePanel(panel)">
-                        <icon-check :size="16" />
-                        通过此格
-                      </button>
-                      <button class="secondaryButton" @click="stage = 4">返回改图</button>
-                      <button class="textButton" @click="panel.approvalFingerprint = ''">撤回通过</button>
-                    </div>
-                  </div>
-                </article>
-              </div>
-              <div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`审稿用第 ${index + 1} 页排版`" /></div>
+              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = 5">调整气泡与文字</button><button class="primaryButton" :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，补齐后可预览整页与导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
+              <div v-if="episode.panels.some((panel) => !panel.image)" class="reviewList"><article v-for="(panel, index) in episode.panels" :key="panel.id" class="surface reviewCard"><img v-if="panel.image" :src="imageUrls[panel.image]" :alt="`第 ${index + 1} 格`" /><div><h3>第 {{ index + 1 }} 格{{ panel.image ? '' : ' · 尚未配图' }}</h3><p>{{ panel.action }}</p><blockquote>{{ panel.dialogue || panel.caption }}</blockquote></div></article></div>
+              <div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页成品预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div>
             </section>
 
             <section v-else-if="stage === 7 && episode" class="splitColumns">
@@ -577,8 +541,8 @@
                     <dd>1080 × 1440</dd>
                   </div>
                   <div>
-                    <dt>审稿状态</dt>
-                    <dd>{{ approvedCount }} / {{ episode.panels.length }} 已通过</dd>
+                    <dt>图片完成</dt>
+                    <dd>{{ episode.panels.filter((panel) => panel.image).length }} / {{ episode.panels.length }} 格</dd>
                   </div>
                   <div>
                     <dt>美术版本</dt>
@@ -587,7 +551,7 @@
                 </dl>
                 <button
                   class="primaryButton"
-                  :disabled="!episode.panels.length || approvedCount !== episode.panels.length"
+                  :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)"
                   @click="run('排版并导出发布包', exportPackage)">
                   <icon-download :size="17" />
                   导出 ZIP 发布包
@@ -647,7 +611,7 @@
     <el-dialog v-model="comparisonVisible" class="platformDialog" title="重画对比 · 两版都会保留" width="min(1000px, 94vw)" alignCenter><template v-if="comparisonPanel"><p>检查动作由谁执行、角色数量、服装与道具。采用版本后需重新审稿；这里不会再次调用模型。</p><div class="imageComparison"><figure v-for="side in ['left', 'right'] as const" :key="side"><label :for="`comparison${side}`">{{ side === 'left' ? '左侧版本' : '右侧版本' }}</label><select :id="`comparison${side}`" :value="side === 'left' ? comparisonLeft : comparisonRight" @change="side === 'left' ? comparisonLeft = ($event.target as HTMLSelectElement).value : comparisonRight = ($event.target as HTMLSelectElement).value"><option v-for="(path, version) in comparisonPanel.history" :key="path" :value="path">版本 {{ version + 1 }}{{ comparisonPanel.image === path ? ' · 当前采用' : comparisonPanel.candidate?.path === path ? ' · 新版候选' : '' }}</option></select><img :src="imageUrls[side === 'left' ? comparisonLeft : comparisonRight]" :alt="side === 'left' ? '左侧漫画版本' : '右侧漫画版本'" /><button :disabled="!!busy || saving" class="primaryButton" @click="run('选择漫画版本', () => useComparedVersion(side === 'left' ? comparisonLeft : comparisonRight))">采用{{ side === 'left' ? '左侧' : '右侧' }}版本</button></figure></div><button v-if="comparisonPanel.candidate" :disabled="!!busy || saving" class="secondaryButton" @click="run('保留旧版', async () => { await resolveCandidate(comparisonPanel!, false); comparisonVisible = false; })">保留当前旧版</button></template></el-dialog>
     <settings v-model="settingsVisible" v-model:panel="settingsPanel" :comicStudio="true">
       <template #comicOverview><settingsOverview :textMode="textMode" :textLabel="textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || ''" :imageLabel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || ''" :codexModel="codexModel" :automatic="collectionSettings.automatic" :intervalMinutes="collectionSettings.intervalMinutes" @navigate="settingsPanel = $event" /></template>
-      <template #comicDefaults><div class="comicSettings"><div class="settingsLead"><h3>为漫画任务分配模型</h3><p>先在「文本模型 / 生图模型」配置供应商，再在这里选择默认服务。文本与生图互不覆盖；更改自动保存。</p></div><div class="settingColumns"><section class="settingCard"><h3>文本任务</h3><p>选梗、故事脚本、分镜结构、反馈复盘。</p><label for="studioTextMode">运行方式</label><select id="studioTextMode" v-model="textMode" :disabled="modelChecking"><option value="codex">本机 Codex CLI</option><option value="api">云端 / 本地文本 API</option></select><template v-if="textMode === 'codex'"><label for="studioCodexModel">Codex 模型 ID</label><input id="studioCodexModel" v-model="codexModel" :disabled="modelChecking" maxlength="101" /><label for="textEffort">编剧推理强度</label><select id="textEffort" v-model="textEffort"><option value="low">快速</option><option value="medium">均衡</option><option value="high">细致</option><option value="xhigh">深入 · 耗时较长</option></select><p>在本机启动 Codex CLI，通过网络调用模型，并非离线模型。复用 CLI 登录，不修改全局配置。</p></template><template v-else><label for="defaultTextModel">默认文本模型</label><select id="defaultTextModel" v-model="textModel" :disabled="modelChecking"><option value="">请先添加文本模型</option><option v-for="model in textModels" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select></template><button :disabled="modelChecking || (textMode === 'api' && !textModel)" @click="probeTextModel">{{ modelChecking ? '正在真实调用…' : '测试文本生成' }}</button><p class="modelProbeResult" role="status">{{ modelProbeMessage || '检测会发起一次简短请求，可能产生少量模型费用。' }}</p><button @click="openSettings('languageModel')">管理文本模型</button><button @click="openSettings('comicLocal')">连接本地文本服务</button></section><section class="settingCard"><h3>生图任务</h3><p>角色设定、画风样张、连续分格出图。</p><label for="studioImageModel">默认生图模型</label><select id="studioImageModel" v-model="imageModel"><option value="">尚未选择生图服务</option><option v-for="model in imageModels.filter((item) => item.configured)" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`" :disabled="!model.configured">{{ model.label }}</option></select><p>{{ imageModel === 'fluxKlein/klein4bit' ? '本机多参考编辑，4步；每格读取正式角色图，最多4位角色。请先用草稿验证身份与场景，无云端API费用。' : imageModel === 'zImage/turbo4bit' ? '本机 MLX 推理，默认768×1024、9步；在分格出图可选画质。无云端API费用。支持单参考图，不支持多角色锁定。' : imageModel === 'codex/imagegen' ? '通过已登录的 Codex CLI 直接生图，自动保存回作品。需联网并使用当前账号额度，不需要另填图片 API 密钥。' : imageModel ? '模型已选择；请在分格出图点击生成，验证实际效果。' : '可使用已登录且支持生图的 Codex CLI，或添加图片 API、本地 ComfyUI 工作流。' }}</p><button @click="openSettings('mediaModel')">管理生图模型与工作流</button><button @click="openSettings('comicLocal')">检测本地生图服务</button></section></div><section class="settingCard"><h3>界面与阅读</h3><p>主题、强调色和界面字号统一由原有「界面设置」管理。漫画成品的字号与排字仍在制作流程中设置。</p><button @click="openSettings('ui')">打开界面设置</button></section></div></template>
+      <template #comicDefaults><div class="comicSettings"><div class="settingsLead"><h3>为漫画任务分配模型</h3><p>先在「文本模型 / 生图模型」配置供应商，再在这里选择默认服务。文本与生图互不覆盖；更改自动保存。</p></div><div class="settingColumns"><section class="settingCard"><h3>文本任务</h3><p>选梗、故事脚本、分镜结构、反馈复盘。</p><label for="studioTextMode">运行方式</label><select id="studioTextMode" v-model="textMode" :disabled="modelChecking"><option value="codex">本机 Codex CLI</option><option value="api">云端 / 本地文本 API</option></select><template v-if="textMode === 'codex'"><label for="studioCodexModel">Codex 模型 ID</label><input id="studioCodexModel" v-model="codexModel" :disabled="modelChecking" maxlength="101" /><label for="textEffort">编剧推理强度</label><select id="textEffort" v-model="textEffort"><option value="low">快速</option><option value="medium">均衡</option><option value="high">细致</option><option value="xhigh">深入 · 耗时较长</option></select><p>在本机启动 Codex CLI，通过网络调用模型，并非离线模型。复用 CLI 登录，不修改全局配置。</p></template><template v-else><label for="defaultTextModel">默认文本模型</label><select id="defaultTextModel" v-model="textModel" :disabled="modelChecking"><option value="">请先添加文本模型</option><option v-for="model in textModels" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select></template><button :disabled="modelChecking || (textMode === 'api' && !textModel)" @click="probeTextModel">{{ modelChecking ? '正在真实调用…' : '测试文本生成' }}</button><p class="modelProbeResult" role="status">{{ modelProbeMessage || '检测会发起一次简短请求，可能产生少量模型费用。' }}</p><button @click="openSettings('languageModel')">管理文本模型</button><button @click="openSettings('comicLocal')">连接本地文本服务</button></section><section class="settingCard"><h3>生图任务</h3><p>角色设定、画风样张、连续分格出图。</p><label for="studioImageModel">默认生图模型</label><select id="studioImageModel" v-model="imageModel"><option value="">尚未选择生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`" :disabled="!model.configured">{{ model.label }}</option></select><p>{{ imageModel === 'fluxKlein/klein4bit' ? '本机多参考编辑，4步；每格读取正式角色图，最多4位角色。请先用草稿验证身份与场景，无云端API费用。' : imageModel === 'zImage/turbo4bit' ? '本机 MLX 推理，默认768×1024、9步；在分格出图可选画质。无云端API费用。支持单参考图，不支持多角色锁定。' : imageModel === 'codex/imagegen' ? '通过已登录的 Codex CLI 直接生图，自动保存回作品。需联网并使用当前账号额度，不需要另填图片 API 密钥。' : imageModel ? '模型已选择；请在分格出图点击生成，验证实际效果。' : '可使用已登录且支持生图的 Codex CLI，或添加图片 API、本地 ComfyUI 工作流。' }}</p><button @click="openSettings('mediaModel')">管理生图模型与工作流</button><button @click="openSettings('comicLocal')">检测本地生图服务</button></section></div><section class="settingCard"><h3>界面与阅读</h3><p>主题、强调色和界面字号统一由原有「界面设置」管理。漫画成品的字号与排字仍在制作流程中设置。</p><button @click="openSettings('ui')">打开界面设置</button></section></div></template>
       <template #comicPlatforms>      <div class="connectionContent">
         <p>按平台连接一次，之后回到选题页使用。你不需要手工查找或粘贴 Cookie。</p>
         <platformAccounts :disabled="!!busy || saving" @collected="(items) => run('收集本人浏览器内容', async () => { if (!project) throw new Error('请先选择创作空间'); const topics = projectSchema.shape.topics.parse(items.map((item) => ({ ...(item as object), id: newTopicId(), verified: false }))); project.topics = [...topics, ...project.topics.filter((old) => !topics.some((item) => old.url === item.url))].slice(0, 1000); await save(); settingsVisible = false; stage = 0; workspaceMode = 'studio'; })" />
@@ -847,6 +811,8 @@ const {
   exportCodexTask,
   preview,
   exportPackage,
+  exportImages,
+  analyzeLibrary,
   ensureImage,
 } = useStudio();
 const comparisonVisible = ref(false);
@@ -929,10 +895,10 @@ const stages = [
   { title: "热点与来源", icon: IconSearch, eyebrow: "DISCOVER", heading: "好故事，从一个好选题开始。", description: "收集资讯、保留来源，选择值得用漫画表达的话题。" },
   { title: "选题与脚本", icon: IconPencil, eyebrow: "WRITE", heading: "让话题，成为一个故事。", description: "核对事实素材，确定表达角度，完成故事与对白。" },
   { title: "分镜设计", icon: IconLayoutBoard, eyebrow: "STORYBOARD", heading: "把故事，一格一格展开。", description: "编排镜头、动作与对白，为每个画面做好准备。" },
-  { title: "角色与美术", icon: IconUserSquareRounded, eyebrow: "ART DIRECTION", heading: "每个故事，都有自己的样子。", description: "收集参考、固定角色，使用可追溯的美术版本。" },
+  { title: "角色与美术", icon: IconUserSquareRounded, eyebrow: "ART DIRECTION", heading: "每个故事，都有自己的样子。", description: "先选本篇角色与画风，再用图片或一句话创建新资源。" },
   { title: "分格出图", icon: IconPhoto, eyebrow: "GENERATE", heading: "让分镜，变成看得见的画面。", description: "逐格生成、导入和重画，保留每一次图片版本。" },
   { title: "字幕与排版", icon: IconTypography, eyebrow: "COMPOSE", heading: "让画面和文字，好好说话。", description: "独立编辑对白与旁白，在实际尺寸中调整排版。" },
-  { title: "审稿修改", icon: IconChecklist, eyebrow: "REVIEW", heading: "最后一遍，认真看过每一格。", description: "检查画面、角色、事实与文字，逐格确认后再导出。" },
+  { title: "整体预览", icon: IconChecklist, eyebrow: "REVIEW", heading: "看看完整效果，满意就导出。", description: "预览整体排版，随时返回微调，不需要逐格审批。" },
   { title: "导出发布", icon: IconPackageExport, eyebrow: "PUBLISH", heading: "把完成的故事，交给读者。", description: "打包成品、文案与来源，前往平台发布并记录作品。" },
 ];
 const comicProjects = computed(() => workspace.projectList.filter((item) => isComicDirectory(item.directory) || item.directory === directory.value));
@@ -982,7 +948,7 @@ function stageComplete(index: number) {
     Boolean(current.styleSnapshot),
     current.panels.length > 0 && current.panels.every((panel) => panel.image),
     previewUrls.value.length > 0,
-    approvedCount.value > 0 && approvedCount.value === current.panels.length,
+    previewUrls.value.length > 0,
     Boolean(safeLink(current.publishedUrl)),
   ][index];
 }
@@ -1059,6 +1025,32 @@ async function deleteSpace() {
 }
 function activateUpload(event: KeyboardEvent) {
   (event.currentTarget as HTMLElement).querySelector<HTMLInputElement>('input[type="file"]')?.click();
+}
+const textServiceLabel = computed(() => textMode.value === "codex" ? `Codex CLI · ${codexModel.value || "默认模型"}` : textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value)?.label || textModel.value || "尚未配置文本模型");
+const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : `图片分析：${textServiceLabel.value}`);
+function syncSpeechActor(panel: Panel, index: number) {
+  const speech = panel.speech[index];
+  if (!speech) return;
+  if (speech.speakerId && !panel.characters.includes(speech.speakerId)) panel.characters.push(speech.speakerId);
+  panel.dialogue = panel.speech.filter((line) => line.kind === "dialogue").map((line) => { const name = episode.value?.castSnapshot.find((person) => person.id === line.speakerId)?.name; return name ? `${name}：${line.text}` : line.text; }).join("\n");
+}
+async function removeLibraryItem(kind: "characters" | "styles", id: string) {
+  if (!project.value) return;
+  if (kind === "styles") {
+    project.value.activeStyleId = "";
+    if (episode.value) episode.value.styleSnapshot = null;
+  } else if (episode.value) {
+    const affected = episode.value.panels.filter((panel) => panel.characters.includes(id) || panel.speech.some((line) => line.speakerId === id));
+    if (affected.length && !await ElMessageBox.confirm(`此角色参与了 ${affected.length} 格。取消后保留文字和图片，清除人物绑定，可在分镜中重新指定。`, "取消本篇角色", { confirmButtonText: "取消选用", cancelButtonText: "保留角色" }).then(() => true, () => false)) return;
+    episode.value.castSnapshot = episode.value.castSnapshot.filter((person) => person.id !== id);
+    for (const panel of episode.value.panels) {
+      panel.characters = panel.characters.filter((value) => value !== id);
+      panel.performances = panel.performances.filter((item) => item.characterId !== id);
+      if (panel.actionSubjectId === id) panel.actionSubjectId = "";
+      for (const line of panel.speech) if (line.speakerId === id) line.speakerId = "";
+    }
+  } else project.value.characters = project.value.characters.filter((person) => person.id !== id);
+  await save();
 }
 async function applyLibraryItem(kind: "characters" | "styles", source: Character | ArtStyle, libraryDirectory: string) {
   if (!project.value) throw new Error("请先选择创作空间");
