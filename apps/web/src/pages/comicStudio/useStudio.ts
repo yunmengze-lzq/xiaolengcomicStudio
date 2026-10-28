@@ -1068,6 +1068,12 @@ export default function useStudio() {
   });
 
   return {
+    requestImage: async (...args: Parameters<typeof requestImage>) => {
+      if (busy.value) throw new Error("请等待当前任务完成");
+      busy.value = "生成公共库图片";
+      try { return await requestImage(...args); }
+      finally { clearInterval(generationTimer); generationProgress.active = false; busy.value = ""; }
+    },
     referenceAnalysisMode,
     analyzeReferences,
     startFromStory,

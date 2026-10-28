@@ -4,7 +4,7 @@ const text = z.string().max(20000);
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const assetPath = z.string().regex(/^assets\/[a-zA-Z0-9_-]+\.(png|jpg|webp)$/);
 const referenceSchema = z.object({ id, path: assetPath, source: z.string().max(2000), note: z.string().max(2000), license: z.string().max(2000).optional() });
-const styleSchema = z.object({
+export const styleSchema = z.object({
   id,
   name: z.string().min(1).max(100),
   description: text,
