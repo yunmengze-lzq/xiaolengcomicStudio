@@ -134,7 +134,7 @@ function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[
   context.restore();
 }
 
-async function drawPanel(context: CanvasRenderingContext2D, files: Files, episode: Episode, panel: Panel, box: number[]) {
+async function drawPanel(context: CanvasRenderingContext2D, files: Files, episode: Episode, panel: Panel, box: number[], warnings?: string[]) {
   const [x, y, width, height] = box;
   const fontSize = episode.layout.fontSize;
   const flavor = episode.layout.comicFlavor !== false;
@@ -154,7 +154,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
     const bubbleHeight = fitted.lines.length * fitted.size * 1.35 + 28;
     const row = Math.floor(index / columns);
     rows[row] = Math.max(rows[row] || 0, bubbleHeight);
-    const shape = flavor && item.shape === "oval" && /[！!]$/.test(item.text) ? "burst" : item.shape;
+    const shape = item.shape;
     return { item, lines: fitted.lines, size: fitted.size, width: bubbleWidth, height: bubbleHeight, row, shape };
   });
   const captionFont = Math.max(20, Math.min(fontSize, 28));
@@ -164,7 +164,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   const topHeight = safe && bubbles.length ? rows.reduce((sum, value) => sum + value + gap, 12) : 0;
   const imageHeight = height - (safe ? topHeight + captionHeight : 0);
   if (imageHeight < height * .28 || captionHeight > height * .45) throw new Error("文字占位过多，请缩短对白、减小字号或改为每页 1–2 格");
-  const image = await loadImage(files, panel.image);
+  const image = panel.image ? await loadImage(files, panel.image) : null;
   context.save();
   if (flavor) {
     context.shadowColor = "rgba(0,0,0,.24)";
@@ -175,16 +175,22 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   context.fillStyle = "#ffffff";
   context.fillRect(x, y, width, height);
   context.restore();
-  const scale = Math.min(width / image.width, imageHeight / image.height);
-  context.drawImage(image, x + (width - image.width * scale) / 2, y + (safe ? topHeight : 0) + (imageHeight - image.height * scale) / 2, image.width * scale, image.height * scale);
+  if (image) {
+    const scale = Math.min(width / image.width, imageHeight / image.height);
+    context.drawImage(image, x + (width - image.width * scale) / 2, y + (safe ? topHeight : 0) + (imageHeight - image.height * scale) / 2, image.width * scale, image.height * scale);
+  } else {
+    context.save(); context.fillStyle = "#edf0ed"; context.fillRect(x, y, width, height);
+    context.fillStyle = "#647269"; context.font = `24px ${family}`; context.textAlign = "center";
+    context.fillText("待配图 · 字幕位置预览", x + width / 2, y + height * .72); context.restore();
+  }
   const occupied: number[][] = [];
   for (const [index, current] of bubbles.entries()) {
     const left = safe ? x + 12 + (index % columns) * (current.width + gap) : x + Math.min(current.item.x * width, width - current.width - 12);
     const tailPad = safe ? 0 : current.item.kind === "thought" ? 26 : current.item.tail !== "none" && current.shape === "oval" ? current.height * (current.item.tailLength ?? .2) : 0;
     const top = safe ? y + 12 + rows.slice(0, current.row).reduce((sum, value) => sum + value + gap, 0) : y + Math.min(current.item.y * height, height - captionHeight - current.height - tailPad - 12);
-    if (top < y || top + current.height + tailPad > y + height - captionHeight) throw new Error("对白超出可用区域，请缩短文字或调整气泡位置");
+    if (top < y || top + current.height + tailPad > y + height - captionHeight) { if (warnings) warnings.push("对白超出可用区域，请调整气泡位置"); else throw new Error("对白超出可用区域，请缩短文字或调整气泡位置"); }
     if (occupied.some(([bx, by, bw, bh]) => left < bx + bw && left + current.width > bx && top < by + bh && top + current.height > by))
-      throw new Error("气泡发生重叠，请移动气泡或使用留白排字模式");
+      { if (warnings) warnings.push("气泡发生重叠，请移动气泡或使用画外留白模式"); else throw new Error("气泡发生重叠，请移动气泡或使用留白排字模式"); }
     occupied.push([left, top, current.width, current.height + tailPad]);
     context.font = `500 ${current.size}px ${family}`;
     bubble(context, current.lines, [left, top, current.width, current.height], current.size, safe ? "none" : current.item.tail, current.shape, current.item.tone, safe ? "narration" : current.item.kind, current.item.tailLength, flavor);
@@ -236,8 +242,8 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   context.strokeRect(x, y, width, height);
 }
 
-export async function renderPages(episode: Episode, files: Files): Promise<Blob[]> {
-  if (!episode.panels.length || episode.panels.some((panel) => !panel.image)) throw new Error("请先完成全部分格出图");
+export async function renderPages(episode: Episode, files: Files, options?: { preview: boolean; warnings: string[] }): Promise<Blob[]> {
+  if (!episode.panels.length || (!options?.preview && episode.panels.some((panel) => !panel.image))) throw new Error("请先完成全部分格出图");
   await document.fonts.ready;
   await loadComicFont(episode.layout.fontFamily);
   const pages: Blob[] = [];
@@ -259,7 +265,7 @@ export async function renderPages(episode: Episode, files: Files): Promise<Blob[
     const width = (1008 - (columns - 1) * 24) / columns;
     const height = (1328 - (rows - 1) * 24) / rows;
     for (let index = 0; index < perPage && offset + index < episode.panels.length; index++) {
-      await drawPanel(context, files, episode, episode.panels[offset + index]!, [36 + (index % columns) * (width + 24), 36 + Math.floor(index / columns) * (height + 24), width, height]);
+      await drawPanel(context, files, episode, episode.panels[offset + index]!, [36 + (index % columns) * (width + 24), 36 + Math.floor(index / columns) * (height + 24), width, height], options?.preview ? options.warnings : undefined);
     }
     if (episode.layout.comicFlavor !== false) {
       const pageNumber = String(Math.floor(offset / perPage) + 1).padStart(2, "0");

@@ -96,6 +96,7 @@ const episodeSchema = z.object({
   sourceStory: text.default(""),
   styleSnapshot: styleSchema.nullable(),
   castSnapshot: z.array(characterSchema).max(30),
+  roleBindings: z.record(z.string().max(100), z.string().max(100)).default({}),
   panels: z.array(panelSchema).max(50),
   layout: layoutSchema,
   postText: text,
@@ -203,6 +204,7 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
     sourceStory: "",
     styleSnapshot: style ? JSON.parse(JSON.stringify(style)) : null,
     castSnapshot: JSON.parse(JSON.stringify(project.characters)),
+    roleBindings: {},
     panels: [],
     layout: { perPage: 4, fontSize: 30, background: "#ffffff", fontFamily: "wenkai", textMode: "overlay", comicFlavor: true },
     postText: "",
@@ -301,7 +303,7 @@ export function characterVisual(character: Character) {
 export function characterPrompt(character: Character, style: Pick<ArtStyle, "description" | "avoid">, local = false) {
   if (local) {
     const views = { sheet: "同一个角色的正面全身、侧面和面部特写三种视角，纯色背景", turnaround: "同一个角色的正面、侧面、背面全身三视图，纯色背景", expressions: "同一张脸的六种表情：平静、开心、惊讶、担心、生气、困倦", portrait: "单个人物半身头像，仅一个视角", fullBody: "单个人物全身立绘，仅一个视角，脚部完整" };
-    return `${views[character.designView]}。${characterVisual(character).slice(0, 260)}。当前设计要求：${character.description.slice(0, 140)}。性格表现：${character.personality.slice(0, 60)}。全篇画风：${style.description.split(/\n/)[0]?.slice(0, 160)}。角色补充画风：${character.artDirection.slice(0, 70)}，服从全篇画风。保持每个视角的发型、脸部与服装相同，衣服和背景为干净无字表面，画面只呈现人物造型。当前输出视图优先于旧分析中的构图和姿势建议。`;
+    return `${views[character.designView]}。目标画风：${style.description.slice(0, 300)}。${characterVisual(character).slice(0, 260)}。当前设计要求：${character.description.slice(0, 140)}。性格表现：${character.personality.slice(0, 60)}。角色补充画风：${character.artDirection.slice(0, 70)}，服从全篇画风。保持每个视角的发型、脸部与服装相同，衣服和背景为干净无字表面，画面只呈现人物造型。当前输出视图优先于旧分析中的构图和姿势建议。`;
   }
   const views = { turnaround: "One character turnaround sheet with full-body front, side and back views of exactly the same character and outfit.", expressions: "One expression reference sheet: the same character face in six expressions (neutral, happy, surprised, worried, angry, sleepy), stable hairstyle and facial features.", sheet: "Character design sheet: full-body front view, side view and a head close-up, the SAME identity and outfit repeated across views.", portrait: "One expressive head-and-shoulders portrait, one view only.", fullBody: "One full-body standing character illustration, one view only, entire outfit and feet visible." };
   const intent = { redesign: "Extract distinctive elements AND the visual style, then design a NEW original character. For a logo, object or animal, reinterpret its colours, silhouette and motifs into the requested person or mascot. Do NOT reproduce the input image, layout, collage or original pose.", identity: "Preserve the referenced character identity and outfit; create the requested new views or pose rather than duplicating the original image.", style: "Use ONLY linework, palette, shading and proportions from the reference; invent a new identity from the user's description. Do not copy the original character or composition." };
@@ -315,16 +317,16 @@ export function referenceReady(target: { refs: { path: string }[]; referenceInte
 }
 
 export function scriptRoleNames(episode: Episode) {
-  const bindings = new Map<string, string>();
+  const bindings = new Map<string, string>(Object.entries(episode.roleBindings).filter(([, id]) => id).map(([name, id]) => [id, name]));
   const speakers = new Set<string>();
   for (const panel of episode.panels) {
     const names = [...new Set(panel.dialogue.split("\n").map((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name))];
     names.forEach((name) => speakers.add(name));
-    if (panel.characters.length === 1 && names.length === 1) bindings.set(panel.characters[0]!, names[0]!);
+    if (panel.characters.length === 1 && names.length === 1 && !Object.hasOwn(episode.roleBindings, names[0]!)) bindings.set(panel.characters[0]!, names[0]!);
   }
-  for (const person of episode.castSnapshot) for (const name of speakers) if ([person.name, ...person.aliases.split(/[,，、\n]/)].some((alias) => alias.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) bindings.set(person.id, name);
+  for (const person of episode.castSnapshot) for (const name of speakers) if (!Object.hasOwn(episode.roleBindings, name) && [person.name, ...person.aliases.split(/[,，、\n]/)].some((alias) => alias.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) bindings.set(person.id, name);
   const remainingRoles = episode.castSnapshot.filter((item) => !bindings.has(item.id));
-  const remainingNames = [...speakers].filter((name) => ![...bindings.values()].includes(name));
+  const remainingNames = [...speakers].filter((name) => !Object.hasOwn(episode.roleBindings, name) && ![...bindings.values()].includes(name));
   // ACT: 仅唯一剩余的一对做排除匹配；多人歧义保留用户的角色ID绑定，不猜测。
   if (remainingRoles.length === 1 && remainingNames.length === 1) bindings.set(remainingRoles[0]!.id, remainingNames[0]!);
   return bindings;
@@ -337,7 +339,7 @@ export function imagePrompt(episode: Episode, panel: Panel, useReferences = true
     const names = scriptRoleNames(episode);
     const roles = cast.map((person, index) => `人物${index + 1}${names.has(person.id) ? `（剧情称呼${names.get(person.id)}）` : ""}：${characterVisual(person).slice(0, cast.length > 1 ? 135 : 210)}；性格${person.personality.slice(0, 30)}`);
     const acting = panel.performances.filter((item) => panel.characters.includes(item.characterId)).map((item) => `人物${cast.findIndex((person) => person.id === item.characterId) + 1}：${item.emotion}，${item.expression}，${item.pose}`.slice(0, 125));
-    return [`一张完整的漫画剧情画面，一个连续场景，${cast.length}位不同人物各出现一次。`, `${panel.shot}。${panel.action.slice(0, 260)}`, panel.actionInstruction.slice(0, 100), ...roles, ...acting, `画风：${episode.styleSnapshot?.description.split(/\n/)[0]?.slice(0, 90) || '日式动漫'}。${panel.revisionRequest.slice(0, 100)}`, "仅绘制本格动作，人物离开设定图的静态站姿；服装、背景与道具保持干净无字表面，文字和气泡由软件另外排版。"].filter(Boolean).join("\n");
+    return [`一张完整的漫画剧情画面，一个连续场景，${cast.length}位不同人物各出现一次。`, `目标画风：${episode.styleSnapshot?.description.slice(0, 300) || "日式动漫"}。`, `${panel.shot}。${panel.action.slice(0, 260)}`, panel.actionInstruction.slice(0, 100), ...roles, ...acting, panel.revisionRequest.slice(0, 100), "仅绘制本格动作，人物离开设定图的静态站姿；服装、背景与道具保持干净无字表面，文字和气泡由软件另外排版。"].filter(Boolean).join("\n");
   }
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
   return [
@@ -351,7 +353,7 @@ export function imagePrompt(episode: Episode, panel: Panel, useReferences = true
     ...panel.performances.filter((item) => panel.characters.includes(item.characterId)).map((item) => `ACTING for ${cast.find((person) => person.id === item.characterId)?.name || item.characterId}: emotional state ${item.emotion}; VISIBLE facial expression ${item.expression}; body language / gaze / pose ${item.pose}. Internal motivation (do not write text in image): ${item.thought}. Show this emotional beat clearly through eyes, brows, mouth and posture; do not reuse a neutral reference pose.`),
     `Style: ${episode.styleSnapshot?.description || "Use the supplied art direction"}`,
     `Avoid: ${episode.styleSnapshot?.avoid || ""}`,
-    ...(referenceOverride ? [referenceOverride] : useReferences ? [referenceIsCurrent ? "The only reference is the OLD VERSION OF THIS PANEL. Preserve its art direction and identities, but replace the incorrect action according to the current subject–action contract. Do not preserve action mistakes or duplicated characters." : "References: style images guide linework and colour; character sheets guide identity. Reference images are not the new action. Follow the current subject–action contract even when the previous frame shows a different pose."] : ["No reference image is supplied. Draw the current action from this description; do not reconstruct a preceding frame."]),
+    ...(referenceOverride ? [referenceOverride] : useReferences ? [referenceIsCurrent ? "The only reference is the OLD VERSION OF THIS PANEL. Preserve its character identities but apply the CURRENT requested art direction, and replace the incorrect action according to the current subject–action contract. Do not preserve action mistakes or duplicated characters." : "References: style images guide linework and colour; character sheets guide identity. Reference images are not the new action. Follow the current subject–action contract even when the previous frame shows a different pose."] : ["No reference image is supplied. Draw the current action from this description; do not reconstruct a preceding frame."]),
     ...(useReferences && !referenceIsCurrent && !referenceOverride && !previous && episode.continuityImage ? ["The last reference is the previous episode ending. Preserve character identity and art style, while following the new episode action and location."] : []),
     ...(useReferences && !referenceIsCurrent && !referenceOverride && previous?.image
       ? [
@@ -369,20 +371,20 @@ export function identityPanelInput(episode: Episode, panel: Panel) {
   if (people.length > 4) throw new Error("本机多参考编辑一次最多4位角色，请拆分镜头");
   const references = people.map((person) => person.image);
   if (new Set(references).size !== references.length) throw new Error("两位角色使用了同一张正式图，请分别指定各自的角色参考图");
-  const styleReference = references.length < 4 ? episode.styleSnapshot?.refs.find((item) => !references.includes(item.path)) : undefined;
+  const styleReference = references.length < 4 ? episode.styleSnapshot?.refs.slice().reverse().find((item) => !references.includes(item.path)) : undefined;
   if (styleReference) references.push(styleReference.path);
   const styleReferenceIndex = references.length;
   const previous = episode.panels[episode.panels.findIndex((item) => item.id === panel.id) - 1];
-  const sceneReference = panel.image || (previous?.image && previous.characters.length === panel.characters.length && previous.characters.every((id) => panel.characters.includes(id)) ? previous.image : "");
+  const sceneReference = (panel.image && panel.generationFingerprint === imageInput(episode, panel) ? panel.image : "") || (previous?.image && previous.generationFingerprint === imageInput(episode, previous) && previous.characters.length === panel.characters.length && previous.characters.every((id) => panel.characters.includes(id)) ? previous.image : "");
   const useSceneReference = !!sceneReference && references.length < 4 && !references.includes(sceneReference);
   if (useSceneReference) references.push(sceneReference);
   const names = scriptRoleNames(episode);
   const prompt = panel.imagePromptOverride.trim() || [
     `One continuous comic scene, exactly ${people.length} distinct characters, each appearing once. Each reference sheet depicts ONE person.`,
+    `Art direction: ${episode.styleSnapshot?.description.slice(0, 360) || "anime manga"}. Keep each identity distinct.`,
     ...people.map((person, index) => `Image ${index + 1} = ${person.name.trim()}${names.has(person.id) ? ` (story name: ${names.get(person.id)})` : ""}. Visual identity: ${characterVisual(person).split(/[；;]整体/)[0]!.slice(0, 170)}.`),
-    `Art direction: ${episode.styleSnapshot?.description.split("\n")[0]?.slice(0, 160) || "anime manga"}. Keep each identity distinct.`,
     ...(styleReference ? [`Image ${styleReferenceIndex}: STYLE ONLY for linework, shading and atmosphere; never copy its people, text, panels or story.`] : []),
-    "Reference identities and clothes override story appearance descriptions. Change only setting, pose and expression. Never mix identities, horns, tails or outfits; never reproduce reference-sheet layouts or labels.",
+    "Preserve identity traits and outfit design, but re-render ALL references in the requested art direction. Reference rendering style must not override the selected art direction. Change setting, pose and expression. Never mix identities, horns, tails or outfits; never reproduce reference-sheet layouts or labels.",
     ...(useSceneReference ? [`Image ${references.length}: continuity reference ONLY for identities, clothes and props. Use the NEW shot, action and framing below; do not copy its pose, camera or background when the story changes.`] : []),
     `Shot: ${panel.shot}. Scene: ${panel.action}`,
     panel.actionInstruction ? `Action: ${panel.actionInstruction}` : "",
@@ -398,7 +400,7 @@ export function referencePaths(episode: Episode, panel: Panel) {
   return [...new Set([
     ...episode.castSnapshot.filter((item) => panel.characters.includes(item.id) && item.image).map((item) => item.image),
     ...(episode.styleSnapshot?.refs.map((item) => item.path) ?? []),
-    ...(previous?.image ? [previous.image] : !previous && episode.continuityImage ? [episode.continuityImage] : []),
+    ...(previous?.image && previous.generationFingerprint === imageInput(episode, previous) ? [previous.image] : []),
   ])];
 }
 
@@ -427,6 +429,7 @@ export function bindCast(episode: Episode, library: Character[]) {
     replacements.set(person.id, target.id);
     return JSON.parse(JSON.stringify(target)) as Character;
   });
+  for (const [name, id] of Object.entries(episode.roleBindings)) episode.roleBindings[name] = replacements.get(id) || id;
   episode.castSnapshot = [...new Map(bound.map((item) => [item.id, item])).values()];
   for (const panel of episode.panels) {
     panel.characters = [...new Set(panel.characters.map((id) => replacements.get(id) || id))];

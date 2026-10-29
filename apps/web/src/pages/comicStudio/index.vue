@@ -374,6 +374,9 @@
               <p class="helperText">上方显示本篇选用；下方是可跨作品复用的公共库。保存档案后，可点击“更新本篇设定”同步修改。</p>
               <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">{{ textServiceLabel }} · 须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
               <artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
+              <section v-if="episode && storySpeakers.length" class="surface castingOverview"><h3>剧本人物 → 固定形象</h3><p>选择角色只加入本篇名单。在这里指定谁来出演，关联外形、性格和台词；之后仍可逐格微调。</p><div v-for="name in storySpeakers" :key="name"><label :for="`castRole${name}`">{{ name }}</label><select :id="`castRole${name}`" :value="castForSpeaker(name)" @change="run('调整剧本人物绑定', () => assignStoryRole(name, ($event.target as HTMLSelectElement).value))"><option value="">尚未绑定</option><option v-for="person in episode.castSnapshot" :key="person.id" :value="person.id">{{ person.name }} · {{ person.personality.slice(0, 25) || '未设性格' }}</option></select></div></section>
+              <details v-if="episode" class="surface castingOverview"><summary>角色绑定 · 查看与调整每格出场人物</summary><p>选入公共库角色只加入本篇演员名单，不会自动替换已有分镜人物。下方可直接调整每格；对白说话者在分镜或字幕页调整。</p><div v-for="(panel, index) in episode.panels" :key="panel.id"><strong>第 {{ index + 1 }} 格</strong><span>{{ episode.castSnapshot.filter((person) => panel.characters.includes(person.id)).map((person) => person.name).join('、') || '未分配角色' }}</span><label v-for="person in episode.castSnapshot" :key="person.id"><input v-model="panel.characters" type="checkbox" :value="person.id" />{{ person.name }}</label><button class="textButton" @click="stage = 2">调整台词与表演</button></div></details>
+              <p v-if="episode?.styleSnapshot" class="helperText">本篇画风：{{ episode.styleSnapshot.name }}。换画风用于后续生成，已有图片需重新绘制。{{ episode.panels.some((panel) => panel.imagePromptOverride) ? '注意：部分分格使用自定义提示词，会覆盖自动整理的画风描述，请在分格出图中检查。' : '' }}</p>
             </section>
 
             <section v-else-if="stage === 4 && episode">
@@ -465,10 +468,9 @@
                   <div><label for="perPage">每页格数</label><select id="perPage" v-model="episode.layout.perPage"><option :value="1">1 格 / 页</option><option :value="2">2 格 / 页</option><option :value="4">4 格 / 页</option></select></div>
                   <div><label for="comicFont">成品字体</label><select id="comicFont" v-model="episode.layout.fontFamily"><option value="sans">清晰黑体 · 系统</option><option value="wenkai">霞鹜文楷 · 内置</option><option value="serif">中文宋体 · 系统</option><option value="genkiGothic">源起黑体 · 内置</option><option value="huninn">粉圆 · 内置</option><option value="genkiMin">源起明体 · 内置</option></select></div>
                   <div><label for="textMode">文字位置</label><select id="textMode" v-model="episode.layout.textMode"><option value="overlay">漫画气泡 · 拖动定位</option><option value="safe">画外留白 · 不遮人物</option></select></div>
-                  <div><label for="fontSize">文字字号：{{ episode.layout.fontSize }} px</label><input id="fontSize" v-model.number="episode.layout.fontSize" type="range" min="20" max="60" /></div>
+                </div><details><summary>页面细节 · 字号、底色与质感</summary><div class="layoutControlGrid">                  <div><label for="fontSize">文字字号：{{ episode.layout.fontSize }} px</label><input id="fontSize" v-model.number="episode.layout.fontSize" type="range" min="20" max="60" /></div>
                   <div><label for="pageBackground">页面底色</label><input id="pageBackground" v-model="episode.layout.background" type="color" /></div>
-                  <div class="flavorToggle"><label for="comicFlavor"><input id="comicFlavor" v-model="episode.layout.comicFlavor" type="checkbox" /> 漫画质感 · 网点、拟声词、页码</label></div>
-                </div>
+                  <div class="flavorToggle"><label for="comicFlavor"><input id="comicFlavor" v-model="episode.layout.comicFlavor" type="checkbox" /> 漫画质感 · 网点、拟声词、页码</label></div></div></details>
                 <p class="helperText">输出 1080 × 1440 PNG。文字独立排版，修改对白无需重新出图。</p>
                 <button class="primaryButton" @click="run('生成排版预览', preview)">
                   <icon-layout :size="16" />
@@ -480,30 +482,17 @@
                 <div class="letteringRows">
                   <article v-for="(panel, index) in episode.panels" v-show="letteringPanel === index" :key="panel.id" class="surface">
                     <h3>第 {{ index + 1 }} 格 · 文字与位置</h3>
-                    <div class="twoFields">
-                      <div>
-                        <label :for="`letterDialogue${index}`">脚本对白（下方编辑气泡）</label>
-                        <textarea :id="`letterDialogue${index}`" v-model="panel.dialogue" :readonly="!!panel.speech.length" rows="2"></textarea>
-                      </div>
-                      <div>
-                        <label :for="`letterCaption${index}`">旁白</label>
-                        <textarea :id="`letterCaption${index}`" v-model="panel.caption" rows="2" maxlength="300"></textarea>
-                      </div>
-                      <div>
-                        <label :for="`letterSfx${index}`">拟声词 / 音效字</label>
-                        <input :id="`letterSfx${index}`" v-model="panel.sfx" maxlength="40" placeholder="叮—— / 咚咚 / 喵" />
-                      </div>
-                    </div>
+                    <details><summary>旁白与音效 · 可选</summary><label :for="`letterCaption${index}`">画外旁白</label><textarea :id="`letterCaption${index}`" v-model="panel.caption" rows="2" maxlength="300" /><label :for="`letterSfx${index}`">音效字</label><input :id="`letterSfx${index}`" v-model="panel.sfx" maxlength="40" /></details>
                     <letteringEditor :panel="panel" :cast="episode.castSnapshot" :imageUrl="imageUrls[panel.image]" :textMode="episode.layout.textMode" :fontFamily="episode.layout.fontFamily" />
                   </article>
                 </div>
-                <div class="pagePreviewColumn"><h3>成品预览</h3><p class="helperText">完整分格与字体已合成，点击图片查看大图。</p><p v-if="previewMessage" class="previewWarning" role="alert">{{ previewMessage }}</p><p v-else-if="!previewUrls.length" class="helperText">图片齐全后自动更新成品预览；修改字号、气泡和排版会实时刷新。</p><div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页排版预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div></div>
+                <div class="pagePreviewColumn"><h3>成品预览</h3><p class="helperText">完整分格与字体已合成，点击图片查看大图。</p><p v-if="previewMessage" class="previewWarning" role="alert">{{ previewMessage }}</p><p v-else-if="!previewUrls.length" class="helperText">缺图以占位图显示，修改字号、气泡和排版会实时刷新。</p><div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页排版预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div></div>
               </div>
             </section>
 
             <section v-else-if="stage === 6 && episode">
-              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = 5">调整气泡与文字</button><button class="primaryButton" :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，补齐后可预览整页与导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
-              <div v-if="episode.panels.some((panel) => !panel.image)" class="reviewList"><article v-for="(panel, index) in episode.panels" :key="panel.id" class="surface reviewCard"><img v-if="panel.image" :src="imageUrls[panel.image]" :alt="`第 ${index + 1} 格`" /><div><h3>第 {{ index + 1 }} 格{{ panel.image ? '' : ' · 尚未配图' }}</h3><p>{{ panel.action }}</p><blockquote>{{ panel.dialogue || panel.caption }}</blockquote></div></article></div>
+              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = 5">调整气泡与文字</button><button class="primaryButton" :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，预览中以占位图显示，字幕正常合成；补齐后即可导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
+
               <div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页成品预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div>
             </section>
 
@@ -1028,6 +1017,38 @@ function activateUpload(event: KeyboardEvent) {
 }
 const textServiceLabel = computed(() => textMode.value === "codex" ? `Codex CLI · ${codexModel.value || "默认模型"}` : textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value)?.label || textModel.value || "尚未配置文本模型");
 const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : `图片分析：${textServiceLabel.value}`);
+const storySpeakers = computed(() => [...new Set((episode.value?.panels || []).flatMap((panel) => panel.dialogue.split("\n").map((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name)))]);
+function castForSpeaker(name: string) {
+  if (episode.value && Object.hasOwn(episode.value.roleBindings, name)) return episode.value.roleBindings[name] || "";
+  const matches = episode.value?.castSnapshot.filter((person) => [person.name, ...person.aliases.split(/[,，、;；\n]/)].some((alias) => alias.trim() === name)) || [];
+  return matches.length === 1 ? matches[0]!.id : "";
+}
+async function assignStoryRole(name: string, id: string) {
+  const current = episode.value;
+  if (!current) return;
+  const oldId = castForSpeaker(name);
+  current.roleBindings[name] = id;
+  for (const person of current.castSnapshot) person.aliases = person.aliases.split(/[,，、;；\n]/).filter((alias) => alias.trim() && alias.trim() !== name).join("，");
+  const person = current.castSnapshot.find((item) => item.id === id);
+  if (person && person.name !== name) person.aliases = [person.aliases, name].filter(Boolean).join("，");
+  for (const panel of current.panels) {
+    const mentioned = panel.dialogue.split("\n").some((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim() === name) || panel.action.includes(name);
+    if (!mentioned) continue;
+    if (oldId && oldId !== id) {
+      panel.characters = panel.characters.filter((value) => value !== oldId);
+      panel.performances.forEach((acting) => { if (acting.characterId === oldId && id) acting.characterId = id; });
+      if (panel.actionSubjectId === oldId) panel.actionSubjectId = id;
+    }
+    if (id && !panel.characters.includes(id)) panel.characters.push(id);
+    if (!panel.speech.length) panel.speech = splitDialogue(panel, current.castSnapshot);
+    const dialogueLines = panel.dialogue.split("\n").filter((line) => line.trim());
+    panel.speech.filter((line) => line.kind === "dialogue").forEach((line, index) => {
+      const match = dialogueLines[index]?.match(/^([^：:]{1,30})[：:]\s*(.*)$/);
+      if (match?.[1]?.trim() === name) { line.speakerId = id; line.text = match[2] || ""; }
+    });
+  }
+  await save();
+}
 function syncSpeechActor(panel: Panel, index: number) {
   const speech = panel.speech[index];
   if (!speech) return;
@@ -1043,6 +1064,7 @@ async function removeLibraryItem(kind: "characters" | "styles", id: string) {
     const affected = episode.value.panels.filter((panel) => panel.characters.includes(id) || panel.speech.some((line) => line.speakerId === id));
     if (affected.length && !await ElMessageBox.confirm(`此角色参与了 ${affected.length} 格。取消后保留文字和图片，清除人物绑定，可在分镜中重新指定。`, "取消本篇角色", { confirmButtonText: "取消选用", cancelButtonText: "保留角色" }).then(() => true, () => false)) return;
     episode.value.castSnapshot = episode.value.castSnapshot.filter((person) => person.id !== id);
+    for (const name of Object.keys(episode.value.roleBindings)) if (episode.value.roleBindings[name] === id) episode.value.roleBindings[name] = "";
     for (const panel of episode.value.panels) {
       panel.characters = panel.characters.filter((value) => value !== id);
       panel.performances = panel.performances.filter((item) => item.characterId !== id);
@@ -1070,7 +1092,7 @@ async function applyLibraryItem(kind: "characters" | "styles", source: Character
     if (episode.value) {
       const castIndex = episode.value.castSnapshot.findIndex((person) => person.id === item.id);
       if (castIndex < 0 && episode.value.castSnapshot.length >= 30) throw new Error("本期角色已达30位上限");
-      if (castIndex < 0) episode.value.castSnapshot.push(structuredClone(item)); else episode.value.castSnapshot[castIndex] = structuredClone(item);
+      if (castIndex < 0) episode.value.castSnapshot.push(structuredClone(item)); else { item.aliases = [...new Set([...(episode.value.castSnapshot[castIndex]!.aliases || "").split(/[,，、;；\n]/), ...(item.aliases || "").split(/[,，、;；\n]/)].filter(Boolean))].join("，"); episode.value.castSnapshot[castIndex] = structuredClone(item); }
     }
   } else {
     const index = project.value.styles.findIndex((style) => style.id === item.id);
@@ -1112,6 +1134,7 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.castingOverview { margin-top:16px; summary { cursor:pointer; font-weight:600; } > div { display:flex; gap:12px; flex-wrap:wrap; align-items:center; border-top:1px solid var(--studioLine); padding:12px 0; } label { display:flex; gap:4px; align-items:center; } }
 .spaceHeading { display: flex; justify-content: space-between; align-items: center; .spaceManage { border: 0; background: transparent; color: #e7eee8; font-size: 24px; padding: 0 8px; cursor: pointer; } }
 .creationSummary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; color: var(--studioMuted); }
 .postToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; select { flex: 1 1 140px; min-width: 0; } }

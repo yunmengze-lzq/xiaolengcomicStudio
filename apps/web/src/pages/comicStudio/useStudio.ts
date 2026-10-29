@@ -136,7 +136,7 @@ export default function useStudio() {
       previewUrls.value.forEach(URL.revokeObjectURL);
       previewUrls.value = [];
       previewMessage.value = "";
-      if (![5, 6].includes(stage.value) || !episode.value?.panels.length || episode.value.panels.some((panel) => !panel.image)) return;
+      if (![5, 6].includes(stage.value) || !episode.value?.panels.length) return;
       previewTimer = setTimeout(() => {
         void preview().catch((error) => { previewMessage.value = error instanceof Error ? error.message : "排版预览失败"; });
       }, 400);
@@ -925,6 +925,7 @@ export default function useStudio() {
     if (!model?.configured) return "请先选择已配置的生图服务";
     try { current.castSnapshot.filter((item) => panel.characters.includes(item.id)).forEach((item) => matchingCharacter(item, project.value?.characters || [])); } catch (error) { return (error as Error).message; }
     if (panel.characters.some((id) => !current.castSnapshot.some((item) => item.id === id))) return "本格有未绑定角色，请到分镜设计选择角色";
+    if (current.castSnapshot.length && panel.dialogue.trim() && !panel.characters.length) return "本格有台词但未分配角色，请到角色与美术的剧本人物对应表完成绑定";
     if (model.providerId === "fluxKlein") {
       try { identityPanelInput(current, panel); } catch (error) { return (error as Error).message; }
     }
@@ -943,7 +944,6 @@ export default function useStudio() {
     if (!current?.styleSnapshot) throw new Error("请先为本期绑定美术风格");
     const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
     if (!model) throw new Error("请在模型设置中配置图片供应商，或使用 Codex 任务包后导入图片");
-    bindCast(current, project.value!.characters);
     const issue = panelGenerationIssue(panel);
     if (issue) throw new Error(issue);
     const targetDirectory = directory.value;
@@ -1012,11 +1012,12 @@ export default function useStudio() {
     const current = episode.value;
     if (!current) throw new Error("请先选择作品");
     const version = ++previewVersion;
-    const pages = await renderPages(clone(current), useWorkspaceFiles(directory.value));
+    const warnings: string[] = [];
+    const pages = await renderPages(clone(current), useWorkspaceFiles(directory.value), { preview: true, warnings });
     if (version !== previewVersion) return;
     previewUrls.value.forEach(URL.revokeObjectURL);
     previewUrls.value = pages.map(URL.createObjectURL);
-    previewMessage.value = "";
+    previewMessage.value = [...new Set(warnings)].join("；");
   }
 
   async function generatePost() {
