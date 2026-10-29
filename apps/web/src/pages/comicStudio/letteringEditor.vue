@@ -8,7 +8,7 @@
       <img v-if="imageUrl" :src="imageUrl" alt="当前分格，拖动图内气泡可调整排字位置" />
       <div v-if="!imageUrl" class="missingArtwork">待配图 · 可先安排字幕</div>
       <template v-if="textMode === 'overlay'">
-        <button v-for="line in panel.speech" :key="line.id" class="draggableBubble" :class="{ darkBubble: line.tone === 'dark' }" :style="{ left: `${line.x * 100}%`, top: `${line.y * 100}%`, width: `${line.width * 100}%` }" :aria-label="`移动${speakerName(line.speakerId) || '对白'}气泡，方向键微调`" @click="activeSpeechId = line.id" @pointerdown="activeSpeechId = line.id; startDrag($event, line)" @keydown="nudge($event, line)"><svg class="bubbleOutline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="bubblePath(line.shape, 100, 100, line.kind === 'dialogue' ? line.tail : 'none', line.tailLength)" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.5" vector-effect="non-scaling-stroke" /><g v-if="line.kind === 'thought'" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.2" vector-effect="non-scaling-stroke"><circle cx="23" cy="108" r="3.5" /><circle cx="18" cy="119" r="2" /></g></svg><span>{{ line.text }}</span></button>
+        <button v-for="line in panel.speech" :key="line.id" class="draggableBubble" :class="{ darkBubble: line.tone === 'dark' }" :style="{ left: `${line.x * 100}%`, top: `${line.y * 100}%`, width: `${line.width * 100}%` }" :aria-label="`移动${speakerName(line.speakerId) || '对白'}气泡，方向键微调`" @click="activeSpeechId = line.id" @pointerdown="activeSpeechId = line.id; startDrag($event, line)" @keydown="nudge($event, line)"><svg class="bubbleOutline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="bubblePath(line.shape, 100, 100, line.kind === 'dialogue' ? line.tail : 'none', line.tailLength)" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.5" vector-effect="non-scaling-stroke" /><g v-if="line.kind === 'thought'" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.2" vector-effect="non-scaling-stroke"><circle cx="23" cy="108" r="3.5" /><circle cx="18" cy="119" r="2" /></g></svg><span :class="{ verticalText: line.vertical }">{{ line.text }}</span></button>
         <span v-if="!panel.speech.length && panel.dialogue" class="legacyBubble" :style="{ left: `${panel.bubbleX * 100}%`, top: `${panel.bubbleY * 100}%` }">{{ panel.dialogue }}</span>
       </template>
       <div v-if="panel.caption" class="captionPreview">{{ panel.caption }}</div>
@@ -26,6 +26,7 @@
       <select :id="`speaker${line.id}`" v-model="line.speakerId" @change="synchronize"><option value="">不标角色</option><option v-for="character in cast" :key="character.id" :value="character.id">{{ character.name }}</option></select>
       <label :for="`kind${line.id}`">文字用途<select :id="`kind${line.id}`" v-model="line.kind" @change="setKind(line); synchronize()"><option value="dialogue">对白 · 角色说出口</option><option value="thought">心声 · 内心独白</option><option value="narration">旁白 · 叙述</option></select></label>
       <textarea v-model="line.text" @input="synchronize" :aria-label="`气泡${index + 1}文字`" maxlength="600" rows="2"></textarea>
+      <label>文字方向<select :value="line.vertical ?? false" @change="line.vertical = ($event.target as HTMLSelectElement).value === 'true'; if (line.vertical) line.width = Math.min(line.width, .32)"><option :value="false">横排</option><option :value="true">竖排 · 从右往左读</option></select></label>
       <details><summary>气泡样式与位置 · 可选</summary><div class="bubbleOptions"><label :for="`shape${line.id}`">气泡外形<select :id="`shape${line.id}`" v-model="line.shape"><option value="oval">圆润对白</option><option value="cloud">云朵心声</option><option value="burst">爆发喊话</option><option value="box">方框旁白</option></select></label><label :for="`tone${line.id}`">配色<select :id="`tone${line.id}`" v-model="line.tone"><option value="light">白底黑字</option><option value="dark">黑底白字</option></select></label>
 
       <label v-if="textMode === 'overlay'" :for="`width${line.id}`">气泡宽度 {{ Math.round(line.width * 100) }}%</label>
@@ -93,6 +94,7 @@ function nudge(event: KeyboardEvent, line: Speech) {
 </script>
 <style scoped lang="scss">
 .letteringEditor {
+  .verticalText { writing-mode: vertical-rl; text-orientation: upright; display: inline-block; max-height: 180px; text-align: start; }
   .speechTabs { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; .selected { background:#365c44; color:white; } }
   .missingArtwork { height:100%; display:grid; place-items:center; color:#68796d; background:#edf0ed; }
   .positionCanvas { position: relative; width: min(100%, 380px); aspect-ratio: 3 / 4; border: 1px solid #ccd8ce; margin: 16px auto; background: white; color: #22372d; overflow: hidden; img { width: 100%; height: 100%; object-fit: contain; } &.safe { display: flex; flex-direction: column; img { min-height: 0; flex: 1; object-fit: contain; } } }

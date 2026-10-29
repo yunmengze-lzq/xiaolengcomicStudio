@@ -41,7 +41,7 @@ const usage = computed(() => {
     add(episode.continuityImage, `连续集：${episode.title}`);
     episode.castSnapshot.forEach((character) => { add(character.image, `作品角色：${episode.title}`); character.designImages.forEach((item) => add(item.path, `作品角色设计：${episode.title}`)); character.refs.forEach((item) => add(item.path, `作品参考：${episode.title}`)); });
     episode.styleSnapshot?.refs.forEach((item) => add(item.path, `作品画风：${episode.title}`));
-    episode.panels.forEach((panel) => { add(panel.image, `漫画：${episode.title}`); panel.history.forEach((path) => add(path, `历史版本：${episode.title}`)); if (panel.candidate) add(panel.candidate.path, `候选图：${episode.title}`); });
+    [...episode.panels, ...episode.directPages].forEach((panel) => { add(panel.image, `漫画：${episode.title}`); panel.history.forEach((path) => add(path, `历史版本：${episode.title}`)); if (panel.candidate) add(panel.candidate.path, `候选图：${episode.title}`); });
   });
   return paths;
 });

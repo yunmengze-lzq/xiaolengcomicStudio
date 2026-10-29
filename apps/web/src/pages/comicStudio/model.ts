@@ -49,6 +49,7 @@ const speechSchema = z.object({
   kind: z.enum(["dialogue", "thought", "narration"]).default("dialogue"),
   shape: z.enum(["oval", "cloud", "burst", "box"]).default("oval"),
   tone: z.enum(["light", "dark"]).default("light"),
+  vertical: z.boolean().optional(),
   tailLength: z.number().min(.05).max(.5).optional(),
   tail: z.enum(["left", "right", "none"]).default("left"),
 });
@@ -82,8 +83,16 @@ const layoutSchema = z.object({
   fontFamily: z.enum(["sans", "wenkai", "serif", "genkiGothic", "huninn", "genkiMin"]).default("sans"),
   textMode: z.enum(["overlay", "safe"]).default("overlay"),
   comicFlavor: z.boolean().default(true),
+  arrangement: z.enum(["grid", "vertical", "horizontal"]).optional(),
+  gutter: z.number().min(8).max(60).optional(),
+});
+const directPageSchema = panelSchema.extend({
+  panelIds: z.array(id).max(6),
+  vertical: z.boolean().default(false),
 });
 const episodeSchema = z.object({
+  productionMode: z.enum(["panels", "direct"]).default("panels"),
+  directPages: z.array(directPageSchema).max(50).default([]),
   id,
   continuityImage: z.union([assetPath, z.literal("")]).default(""),
   parentEpisodeId: z.string().max(100).default(""),
@@ -193,6 +202,8 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
   const style = project.styles.find((item) => item.id === project.activeStyleId) ?? null;
   return {
     id: crypto.randomUUID(),
+    productionMode: "panels",
+    directPages: [],
     continuityImage: "",
     parentEpisodeId: "",
     episodeNumber: 1,
@@ -437,4 +448,28 @@ export function bindCast(episode: Episode, library: Character[]) {
     panel.performances.forEach((item) => { item.characterId = replacements.get(item.characterId) || item.characterId; });
     panel.speech.forEach((item) => { item.speakerId = replacements.get(item.speakerId) || item.speakerId; });
   }
+}
+
+
+export function directPageInput(episode: Episode, page: Episode["directPages"][number]) {
+  if (!page.panelIds.length) throw new Error("请先为本页选择分镜");
+  const panels = page.panelIds.map((id) => episode.panels.find((panel) => panel.id === id));
+  if (panels.some((panel) => !panel)) throw new Error("本页有已删除的分镜，请重新选择画面");
+  const cast = episode.castSnapshot.filter((person) => panels.some((panel) => panel!.characters.includes(person.id)));
+  const references = [...new Set([...cast.map((person) => person.image), episode.styleSnapshot?.refs.at(-1)?.path].filter((path): path is string => !!path))];
+  const prompt = [
+    "绘制一张完整的彩色漫画成品页，纵向3:4。不是单幅插画，不是角色设定集。将以下分镜按顺序拼成一页，阅读顺序从左至右、从上至下。画框、场景、人物、对白气泡统一设计。",
+    `全篇画风：${episode.styleSnapshot?.description || "清晰动漫线稿、赛璐璐上色"}。避免：${episode.styleSnapshot?.avoid || ""}`,
+    `气泡为简洁日漫细黑线白底，尖尾巴指向说话者，预留文字空间不遮挡脸。对白${page.vertical ? "竖排，每列从上往下、列从右往左" : "横排"}。只绘制指定对白、心声、旁白，不加人物标签、英文说明、水印或额外文字。准确书写中文。`,
+    ...(episode.styleSnapshot?.refs.at(-1)?.path ? [`参考图${references.indexOf(episode.styleSnapshot.refs.at(-1)!.path) + 1}为画风参考，参考其线条、色彩与光影，不复制其人物。`] : []),
+    ...cast.map((person) => `固定角色${person.name}：${person.visualSummary || person.description}；性格${person.personality}；说话方式${person.speechStyle}。${person.image ? `参考图${references.indexOf(person.image) + 1}绑定此角色，保持面貌服装，不混淆身份。` : ""}`),
+    ...panels.map((panel, index) => `第${index + 1}格：${panel!.shot}；${panel!.action}。人物：${cast.filter((person) => panel!.characters.includes(person.id)).map((person) => person.name).join("、")}。表演：${JSON.stringify(panel!.performances)}。文字：${panel!.speech.length ? panel!.speech.map((line) => `${line.kind} / ${episode.castSnapshot.find((person) => person.id === line.speakerId)?.name || "未署名"}：${line.text}`).join("；") : panel!.dialogue}。旁白：${panel!.caption}。音效：${panel!.sfx}`),
+    `本页构图与重绘要求：${page.revisionRequest || "清晰自然的连续叙事，气泡融入构图"}`,
+  ].join("\n");
+  return { prompt, references, fingerprint: stableSnapshot({ prompt, references }) };
+}
+
+export function productionReady(episode: Episode) {
+  const images = episode.productionMode === "direct" ? episode.directPages : episode.panels;
+  return images.length > 0 && images.every((item) => !!item.image);
 }

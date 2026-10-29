@@ -7,7 +7,7 @@ import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import saveFile from "@/lib/saveFile";
 import { uiSettings, settings as appSettings } from "@/stores/settings";
-import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, identityPanelInput, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter } from "./model";
+import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, identityPanelInput, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter, directPageInput, productionReady } from "./model";
 import type { ComicProject, Topic, Panel, ArtStyle, MemeIdea, Character } from "./model";
 import { keywordInsights } from "./creatorInsights";
 import { renderPages } from "./render";
@@ -129,7 +129,7 @@ export default function useStudio() {
   const approvedCount = computed(() => episode.value?.panels.filter((panel) => isApproved(episode.value!, panel)).length ?? 0);
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
   watch(
-    () => JSON.stringify({ stage: stage.value, id: episode.value?.id, layout: episode.value?.layout, panels: episode.value?.panels.map((panel) => [panel.image, panel.dialogue, panel.caption, panel.bubbleX, panel.bubbleY, panel.speech]) }),
+    () => JSON.stringify({ stage: stage.value, id: episode.value?.id, mode: episode.value?.productionMode, pages: episode.value?.directPages, layout: episode.value?.layout, panels: episode.value?.panels.map((panel) => [panel.image, panel.dialogue, panel.caption, panel.bubbleX, panel.bubbleY, panel.speech]) }),
     () => {
       clearTimeout(previewTimer);
       previewVersion++;
@@ -167,7 +167,7 @@ export default function useStudio() {
         ...project.value.characters.flatMap((item) => [item.image, ...item.designImages.map((design) => design.path), ...item.refs.map((ref) => ref.path)]),
         ...project.value.episodes.flatMap((item) => [
           ...item.castSnapshot.flatMap((character) => [character.image, ...character.designImages.map((design) => design.path), ...character.refs.map((ref) => ref.path)]),
-          ...item.panels.flatMap((panel) => [panel.image, ...panel.history]),
+          ...[...item.panels, ...item.directPages].flatMap((panel) => [panel.image, ...panel.history]),
         ]),
       ].filter(Boolean),
     );
@@ -893,6 +893,7 @@ export default function useStudio() {
   }
 
   async function requestImage(model: Model, targetDirectory: string, prompt: string, references: string[]) {
+    if (model.providerId === "fluxKlein" && references.length > 4) throw new Error("本地 FLUX.2 klein 最多4张参考图，请减少本页人物或改用支持更多参考图的服务");
     if (references.length > 12) throw new Error("一次最多12张参考图，请减少角色、画风参考或更换工作流");
     if (model.providerId === "zImage" && references.length > 1) throw new Error("本机 Z-Image 只能使用一张参考图。请保留一张参考，或切换支持多参考图的生图服务");
     Object.assign(generationProgress, { active: true, phase: "等待模型生成", elapsedSeconds: 0, model: model.label });
@@ -961,6 +962,39 @@ export default function useStudio() {
     const path = await adoptImage(panel, generated.path, fingerprint, true);
     const asset = project.value?.assets.find((item) => item.path === path);
     if (asset) Object.assign(asset, { method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件分镜生成", license: "待按供应商条款确认用途", seed: generated.seed, prompt: generationPrompt, model: `${model.providerId}/${model.modelId}` });
+    await save();
+  }
+
+  async function generateDirectPage(page: NonNullable<typeof episode.value>["directPages"][number]) {
+    const current = episode.value;
+    if (!current?.styleSnapshot) throw new Error("请先选择本篇画风");
+    const model = imageModels.value.find((item) => `${item.providerId}/${item.modelId}` === imageModel.value);
+    if (!model?.configured) throw new Error("请选择已配置的生图服务");
+    for (const id of page.panelIds) {
+      const panel = current.panels.find((item) => item.id === id);
+      if (!panel) throw new Error("本页分镜已删除，请重新选择");
+      if (current.castSnapshot.length && panel.dialogue.trim() && !panel.characters.length) throw new Error("请先为本页分镜绑定角色，再生成整页");
+    }
+    const input = directPageInput(current, page);
+    const targetDirectory = directory.value;
+    generationProgress.panelId = page.id;
+    const { data } = await requestImage(model, targetDirectory, input.prompt, input.references);
+    if (data.code !== 200 || !data.data?.[0]?.path) throw new Error(data.message || "没有返回整页图片");
+    if (directory.value !== targetDirectory) return;
+    const path = await adoptImage(page, data.data[0].path, input.fingerprint, true);
+    const asset = project.value?.assets.find((item) => item.path === path);
+    if (asset) Object.assign(asset, { method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", seed: data.data[0].seed, source: "整页漫画生成（含对白）", prompt: input.prompt, model: `${model.providerId}/${model.modelId}` });
+    await save();
+  }
+
+  async function resolveDirectPage(page: NonNullable<typeof episode.value>["directPages"][number], accept: boolean) {
+    if (!page.candidate || !episode.value) return;
+    if (accept) {
+      if (page.candidate.fingerprint !== directPageInput(episode.value, page).fingerprint) throw new Error("候选生成后台词或设定发生变化，请重新生成");
+      page.image = page.candidate.path;
+      page.generationFingerprint = page.candidate.fingerprint;
+    }
+    page.candidate = null;
     await save();
   }
 
@@ -1046,7 +1080,7 @@ export default function useStudio() {
   }
 
   async function exportImages() {
-    if (!episode.value?.panels.length || episode.value.panels.some((panel) => !panel.image)) throw new Error("请先补齐分格图片");
+    if (!episode.value || !productionReady(episode.value)) throw new Error("请先补齐分格图片");
     const pages = await renderPages(episode.value, files.value);
     if (pages.length === 1) await saveFile(pages[0]!, "comicPage.png");
     else {
@@ -1058,7 +1092,7 @@ export default function useStudio() {
 
   async function exportPackage() {
     const current = episode.value;
-    if (!current?.panels.length || current.panels.some((panel) => !panel.image)) throw new Error("请先补齐分格图片，再导出");
+    if (!current || !productionReady(current)) throw new Error("请先补齐分格图片，再导出");
     const taskFiles = useWorkspaceFiles(directory.value);
     const pages = await renderPages(current, taskFiles);
     const archive: Record<string, Uint8Array> = {};
@@ -1066,11 +1100,12 @@ export default function useStudio() {
       archive[`page${String(index + 1).padStart(2, "0")}.png`] = new Uint8Array(await pages[index]!.arrayBuffer());
     archive["publish.txt"] = strToU8(publicationText(current));
     archive["internalReview.txt"] = strToU8(`仅供创作者审核，不是发布正文。\n生成方式：请结合素材来源记录确认 AI 辅助情况，并按发布平台要求完成标识。\n参考来源：${current.topic.url || current.topic.source}\n风格版本：${current.styleSnapshot?.name} (${current.styleSnapshot?.id})\n参考素材包：${current.researchPackId || "无"}\n`);
-    archive["readme.txt"] = strToU8(`小冷漫画发布包\n成品为 1080×1440 PNG，按 page01、page02 顺序发布。\n每页 ${current.layout.perPage} 格；字体 ${current.layout.fontFamily}；文字模式 ${current.layout.textMode}。文字已经绘制进 PNG，不依赖读者安装字体。\nepisode.json 保留故事、分镜、多角色对白、角色与美术快照。assets 为实际使用的原始图片。\n发布前请按平台要求声明 AI 辅助创作，软件未自动发布。\n`);
+    archive["readme.txt"] = strToU8(`小冷漫画发布包\n${current.productionMode === "direct" ? "整页成品按模型原始尺寸导出 PNG，不重复叠加字幕" : "成品为 1080×1440 PNG"}，按 page01、page02 顺序发布。\n${current.productionMode === "direct" ? "整页包含模型绘制或导入的对白，请核对错字和画面内容。" : `每页 ${current.layout.perPage} 格；字体 ${current.layout.fontFamily}；文字模式 ${current.layout.textMode}。文字已经绘制进 PNG，不依赖读者安装字体。`}\nepisode.json 保留故事、分镜、多角色对白、角色与美术快照。assets 为实际使用的原始图片。\n发布前请按平台要求声明 AI 辅助创作，软件未自动发布。\n`);
     archive["episode.json"] = strToU8(JSON.stringify(current, null, 2));
     const paths = new Set(
       [
         ...current.panels.flatMap((panel) => [panel.image, ...referencePaths(current, panel)]),
+        ...current.directPages.map((page) => page.image),
         ...current.castSnapshot.map((character) => character.image),
       ].filter(Boolean),
     );
@@ -1192,6 +1227,8 @@ export default function useStudio() {
     adoptImage,
     panelGenerationIssue,
     generatePanel,
+    generateDirectPage,
+    resolveDirectPage,
     generateMissingPanels,
     exportCodexTask,
     preview,

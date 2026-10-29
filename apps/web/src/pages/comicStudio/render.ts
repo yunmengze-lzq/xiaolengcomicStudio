@@ -104,22 +104,16 @@ export function bubblePath(shape: Speech["shape"], width = 100, height = 100, ta
   return `M${r},0 H${width-r} Q${width},0 ${width},${r} V${height-r} Q${width},${height} ${width-r},${height} H${r} Q0,${height} 0,${height-r} V${r} Q0,0 ${r},0 Z`;
 }
 
-function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none", shape: Speech["shape"] = "oval", tone: Speech["tone"] = "light", kind: Speech["kind"] = "dialogue", tailLength = .2, flavor = true) {
+function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[], fontSize: number, tail: "left" | "right" | "none" = "none", shape: Speech["shape"] = "oval", tone: Speech["tone"] = "light", kind: Speech["kind"] = "dialogue", tailLength = .2, flavor = true, vertical = false) {
   const [x, y, width, height] = box;
   context.save();
   context.translate(x, y);
   const outline = new Path2D(bubblePath(shape, width, height, kind === "dialogue" ? tail : "none", tailLength));
   context.fillStyle = tone === "dark" ? "#202228" : "#fffdf5";
-  if (flavor) {
-    context.shadowColor = "rgba(0,0,0,.22)";
-    context.shadowBlur = 8;
-    context.shadowOffsetX = 2;
-    context.shadowOffsetY = 4;
-  }
   context.fill(outline);
   context.shadowColor = "transparent";
   context.strokeStyle = flavor ? "#171717" : "#202228";
-  context.lineWidth = flavor ? 3.2 : 2.5;
+  context.lineWidth = 2;
   context.stroke(outline);
   context.restore();
   if (kind === "thought") {
@@ -130,7 +124,12 @@ function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[
   context.textAlign = "center";
   context.textBaseline = "middle";
   const lineHeight = fontSize * 1.35;
-  lines.forEach((line, index) => context.fillText(line, x + width / 2, y + height / 2 + (index - (lines.length - 1) / 2) * lineHeight));
+  if (vertical) {
+    lines.forEach((line, column) => [...line].forEach((character, row) => {
+      const punctuation: Record<string, string> = { "（": "︵", "）": "︶", "「": "﹁", "」": "﹂", "『": "﹃", "』": "﹄", "…": "︙", "—": "︱" };
+      context.fillText(punctuation[character] || character, x + width / 2 + ((lines.length - 1) / 2 - column) * lineHeight, y + height / 2 + (row - ([...line].length - 1) / 2) * fontSize * 1.15);
+    }));
+  } else lines.forEach((line, index) => context.fillText(line, x + width / 2, y + height / 2 + (index - (lines.length - 1) / 2) * lineHeight));
   context.restore();
 }
 
@@ -143,19 +142,33 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
   const speech = panel.speech.length ? panel.speech.filter((item) => item.text.trim()).map((item) => {
     const speaker = episode.castSnapshot.find((person) => person.id === item.speakerId);
     return { ...item, label: `${episode.layout.textMode === "safe" && speaker ? `${speaker.name}${item.kind === "thought" ? "（心声）" : ""}：` : ""}${item.text}` };
-  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, kind: "dialogue" as const, shape: "oval" as const, tone: "light" as const, tail: "left" as const, tailLength: .2 }] : [];
+  }) : panel.dialogue.trim() ? [{ id: "legacy", speakerId: "", text: panel.dialogue, label: panel.dialogue, x: panel.bubbleX, y: panel.bubbleY, width: .74, kind: "dialogue" as const, shape: "oval" as const, tone: "light" as const, tail: "left" as const, tailLength: .2, vertical: false }] : [];
   const safe = episode.layout.textMode === "safe";
   const columns = safe && speech.length > 1 ? 2 : 1;
   const gap = 12;
   const rows: number[] = [];
   const bubbles = speech.map((item, index) => {
     const bubbleWidth = safe ? (width - 24 - (columns - 1) * gap) / columns : Math.min(width - 24, Math.max(190, width * item.width));
-    const fitted = fitBubbleText(context, item.label, bubbleWidth - 44, height * (safe ? .44 : .38), fontSize, family);
-    const bubbleHeight = fitted.lines.length * fitted.size * 1.35 + 28;
+    const vertical = !!item.vertical && !safe;
+    const fitted = fitBubbleText(context, item.label, bubbleWidth * .76, height * (safe ? .44 : .38), fontSize, family);
+    let bubbleHeight = fitted.lines.length * fitted.size * 1.35 + 40;
+    if (vertical) {
+      fitted.size = fontSize;
+      while (fitted.size >= 18) {
+        const perColumn = Math.max(1, Math.floor((height * .48 - 48) / (fitted.size * 1.15)));
+        fitted.lines = item.label.split("\n").flatMap((paragraph) => {
+          const chars = [...paragraph];
+          return Array.from({ length: Math.ceil(chars.length / perColumn) }, (_, index) => chars.slice(index * perColumn, (index + 1) * perColumn).join(""));
+        });
+        if (fitted.lines.length * fitted.size * 1.35 <= bubbleWidth * .72) break;
+        fitted.size--;
+      }
+      bubbleHeight = Math.max(1, ...fitted.lines.map((line) => [...line].length)) * fitted.size * 1.15 + 48;
+    }
     const row = Math.floor(index / columns);
     rows[row] = Math.max(rows[row] || 0, bubbleHeight);
     const shape = item.shape;
-    return { item, lines: fitted.lines, size: fitted.size, width: bubbleWidth, height: bubbleHeight, row, shape };
+    return { item, lines: fitted.lines, size: fitted.size, width: bubbleWidth, height: bubbleHeight, row, shape, vertical };
   });
   const captionFont = Math.max(20, Math.min(fontSize, 28));
   context.font = `500 ${captionFont}px ${family}`;
@@ -193,7 +206,7 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
       { if (warnings) warnings.push("气泡发生重叠，请移动气泡或使用画外留白模式"); else throw new Error("气泡发生重叠，请移动气泡或使用留白排字模式"); }
     occupied.push([left, top, current.width, current.height + tailPad]);
     context.font = `500 ${current.size}px ${family}`;
-    bubble(context, current.lines, [left, top, current.width, current.height], current.size, safe ? "none" : current.item.tail, current.shape, current.item.tone, safe ? "narration" : current.item.kind, current.item.tailLength, flavor);
+    bubble(context, current.lines, [left, top, current.width, current.height], current.size, safe ? "none" : current.item.tail, current.shape, current.item.tone, safe ? "narration" : current.item.kind, current.item.tailLength, flavor, current.vertical);
   }
   if (captionLines.length) {
     context.save();
@@ -243,6 +256,22 @@ async function drawPanel(context: CanvasRenderingContext2D, files: Files, episod
 }
 
 export async function renderPages(episode: Episode, files: Files, options?: { preview: boolean; warnings: string[] }): Promise<Blob[]> {
+  if (episode.productionMode === "direct") {
+    if (!episode.directPages.length) throw new Error("请先添加整页漫画");
+    if (!options?.preview && episode.directPages.some((page) => !page.image)) throw new Error("请先补齐整页漫画图片");
+    const results: Blob[] = [];
+    for (const [index, page] of episode.directPages.entries()) {
+      if (!page.image) { options?.warnings.push(`第 ${index + 1} 页尚未生成`); continue; }
+      const image = await loadImage(files, page.image);
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width; canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("浏览器不支持画布导出");
+      context.drawImage(image, 0, 0);
+      results.push(await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("整页导出失败")), "image/png")));
+    }
+    return results;
+  }
   if (!episode.panels.length || (!options?.preview && episode.panels.some((panel) => !panel.image))) throw new Error("请先完成全部分格出图");
   await document.fonts.ready;
   await loadComicFont(episode.layout.fontFamily);
@@ -260,12 +289,13 @@ export async function renderPages(episode: Episode, files: Files, options?: { pr
       context.fillRect(0, 0, 1080, 1440);
     }
     const count = Math.min(perPage, episode.panels.length - offset);
-    const columns = count === 1 ? 1 : perPage === 4 ? 2 : 1;
+    const gutter = episode.layout.gutter ?? 24;
+    const columns = count === 1 || episode.layout.arrangement === "vertical" ? 1 : episode.layout.arrangement === "horizontal" ? count : perPage === 4 ? 2 : 1;
     const rows = Math.ceil(count / columns);
-    const width = (1008 - (columns - 1) * 24) / columns;
-    const height = (1328 - (rows - 1) * 24) / rows;
+    const width = (1008 - (columns - 1) * gutter) / columns;
+    const height = (1328 - (rows - 1) * gutter) / rows;
     for (let index = 0; index < perPage && offset + index < episode.panels.length; index++) {
-      await drawPanel(context, files, episode, episode.panels[offset + index]!, [36 + (index % columns) * (width + 24), 36 + Math.floor(index / columns) * (height + 24), width, height], options?.preview ? options.warnings : undefined);
+      await drawPanel(context, files, episode, episode.panels[offset + index]!, [36 + (index % columns) * (width + gutter), 36 + Math.floor(index / columns) * (height + gutter), width, height], options?.preview ? options.warnings : undefined);
     }
     if (episode.layout.comicFlavor !== false) {
       const pageNumber = String(Math.floor(offset / perPage) + 1).padStart(2, "0");

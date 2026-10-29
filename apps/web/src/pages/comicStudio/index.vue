@@ -27,10 +27,10 @@
             <icon-chevron-right v-if="!sidebarCollapsed" class="groupChevron" :size="15" :class="{ rotated: expandedSections.has('studio') }" aria-hidden="true" />
           </button>
           <div v-if="expandedSections.has('studio') && !sidebarCollapsed" id="studioNavigation" class="stageNav">
-            <button v-for="(item, index) in stages" :key="item.title" :class="{ active: workspaceMode === 'studio' && stage === index }" :aria-current="workspaceMode === 'studio' && stage === index ? 'page' : undefined" :aria-label="`${String(index + 1).padStart(2, '0')} ${item.title}${stageComplete(index) ? '，已完成' : ''}`" :disabled="!project || !!busy" @click="workspaceMode = 'studio'; stage = index">
+            <button v-for="(item, index) in stages" v-show="index !== 5" :key="item.title" :class="{ active: workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) }" :aria-current="workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) ? 'page' : undefined" :aria-label="`${String(index > 5 ? index : index + 1).padStart(2, '0')} ${item.title}${stageComplete(index) ? '，已完成' : ''}`" :disabled="!project || !!busy" @click="workspaceMode = 'studio'; stage = index">
               <component :is="item.icon" :size="18" stroke="1.7" class="navIcon" aria-hidden="true" />
               <span class="navText">{{ item.title }}</span>
-              <span class="stageNumber" aria-hidden="true">{{ String(index + 1).padStart(2, '0') }}</span>
+              <span class="stageNumber" aria-hidden="true">{{ String(index > 5 ? index : index + 1).padStart(2, '0') }}</span>
               <icon-check v-if="stageComplete(index)" class="stageDone" :size="14" aria-hidden="true" />
             </button>
           </div>
@@ -127,7 +127,7 @@
           <div v-if="episode && stage > 0" class="productionStatus" aria-label="本期制作状态">
             <button @click="stage = 1">{{ episode.story ? '✓' : '○' }} 故事脚本</button>
             <button @click="stage = 3">{{ episode.styleSnapshot ? '✓' : '○' }} 美术风格 · {{ episode.castSnapshot.length }} 位角色</button>
-            <button @click="stage = 4">{{ episode.panels.filter((panel) => panel.image).length }} / {{ episode.panels.length }} 格出图</button>
+            <button @click="stage = 4">{{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).filter((panel) => panel.image).length }} / {{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).length }} {{ episode.productionMode === 'direct' ? '页' : '格' }}出图</button>
             <button @click="stage = 6">整体效果预览</button>
           </div>
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
@@ -380,6 +380,7 @@
             </section>
 
             <section v-else-if="stage === 4 && episode">
+              <div class="surface productionModeBar"><h2>漫画制作</h2><div class="panelActions"><button :class="episode.productionMode === 'direct' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'direct'" @click="episode.productionMode = 'direct'">整页直出 · 含对白</button><button :class="episode.productionMode === 'panels' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'panels'" @click="episode.productionMode = 'panels'">分格制作 · 可编辑排版</button><button v-if="episode.productionMode === 'panels'" class="secondaryButton" @click="stage = 5">排版与气泡 →</button></div><p class="helperText">整页一次生成完整漫画；分格先画无字画面，再拼页、移动气泡。两种模式分别保留图片。</p></div>
               <div class="toolbar">
                 <div class="inlineFields">
                   <label for="imageModel">图片服务</label>
@@ -389,15 +390,17 @@
                       {{ model.label }}
                     </option>
                   </select>
-                  <template v-if="['zImage/turbo4bit', 'fluxKlein/klein4bit'].includes(imageModel)"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select></template><template v-if="imageModel === 'zImage/turbo4bit'"><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">按分镜重绘 · 支持单人和多人</option><option value="reference">参考本格旧图 · 修订画面</option></select></template>
+                  <template v-if="['zImage/turbo4bit', 'fluxKlein/klein4bit'].includes(imageModel)"><label for="zImageQuality">本地画质</label><select id="zImageQuality" v-model="zImageQuality"><option value="draft">草稿验证 · 384×512</option><option value="standard">标准清晰 · 768×1024</option><option value="detail">细节优先 · 896×1152 · 较慢</option></select></template><template v-if="imageModel === 'zImage/turbo4bit' && episode.productionMode === 'panels'"><label for="zImageReferenceMode">本地参考方式</label><select id="zImageReferenceMode" v-model="zImageReferenceMode"><option value="text">按分镜重绘 · 支持单人和多人</option><option value="reference">参考本格旧图 · 修订画面</option></select></template>
                   <button class="secondaryButton" @click="openSettings('comicDefaults')">配置服务</button>
-                  <button class="primaryButton" :disabled="!imageModel" @click="run('连续生成待出图', generateMissingPanels)">连续生成待出图</button>
+                  <button v-if="episode.productionMode === 'panels'" class="primaryButton" :disabled="!imageModel" @click="run('连续生成待出图', generateMissingPanels)">连续生成待出图</button>
                 </div>
-                <button class="primaryButton" @click="run('打包 Codex 出图任务', exportCodexTask)">
+                <button v-if="episode.productionMode === 'panels'" class="primaryButton" @click="run('打包 Codex 出图任务', exportCodexTask)">
                   <icon-package-export :size="16" />
                   手动协作：导出任务包
                 </button>
               </div>
+              <directPageEditor v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
+              <template v-else>
               <p class="helperText">
                 <template v-if="imageModel === 'zImage/turbo4bit'">本地默认把角色外形摘要、性格和分镜动作合成文字后重绘，支持多人。普通图生图会保留设定图布局，所以仅用于明确选择的旧图修订；本地身份一致性仍需审核。</template><template v-else-if="imageModel === 'fluxKlein/klein4bit'">本机多参考编辑会实际读取本格每位角色的正式图，按顺序绑定剧情人物；保留参考图服装和外形，仅改变场景、动作与表情。最多4位角色，生成后仍需对照原图审核。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
               </p>
@@ -459,13 +462,15 @@
                   </div>
                 </article>
               </div>
+              </template>
             </section>
 
             <section v-else-if="stage === 5 && episode" class="layoutStage">
               <div class="surface layoutControls">
-                <h2>页面与文字</h2>
+                <div class="panelActions"><button class="secondaryButton" @click="stage = 4">← 漫画制作 · 绘制画面</button><strong>分格制作 / 排版与气泡</strong></div><h2>页面与文字</h2>
                 <div class="layoutControlGrid">
                   <div><label for="perPage">每页格数</label><select id="perPage" v-model="episode.layout.perPage"><option :value="1">1 格 / 页</option><option :value="2">2 格 / 页</option><option :value="4">4 格 / 页</option></select></div>
+                  <div><label for="pageArrangement">拼页方式</label><select id="pageArrangement" :value="episode.layout.arrangement || 'grid'" @change="episode.layout.arrangement = ($event.target as HTMLSelectElement).value as 'grid' | 'vertical' | 'horizontal'"><option value="grid">标准分格</option><option value="vertical">上下排列</option><option value="horizontal">左右排列</option></select></div><div><label for="pageGutter">画格间距 {{ episode.layout.gutter ?? 24 }} px</label><input id="pageGutter" :value="episode.layout.gutter ?? 24" @input="episode.layout.gutter = Number(($event.target as HTMLInputElement).value)" type="range" min="8" max="60" /></div>
                   <div><label for="comicFont">成品字体</label><select id="comicFont" v-model="episode.layout.fontFamily"><option value="sans">清晰黑体 · 系统</option><option value="wenkai">霞鹜文楷 · 内置</option><option value="serif">中文宋体 · 系统</option><option value="genkiGothic">源起黑体 · 内置</option><option value="huninn">粉圆 · 内置</option><option value="genkiMin">源起明体 · 内置</option></select></div>
                   <div><label for="textMode">文字位置</label><select id="textMode" v-model="episode.layout.textMode"><option value="overlay">漫画气泡 · 拖动定位</option><option value="safe">画外留白 · 不遮人物</option></select></div>
                 </div><details><summary>页面细节 · 字号、底色与质感</summary><div class="layoutControlGrid">                  <div><label for="fontSize">文字字号：{{ episode.layout.fontSize }} px</label><input id="fontSize" v-model.number="episode.layout.fontSize" type="range" min="20" max="60" /></div>
@@ -481,7 +486,7 @@
                 <div class="letteringTabs" aria-label="选择要排字的分格"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: letteringPanel === index }" @click="letteringPanel = index">第 {{ index + 1 }} 格</button></div>
                 <div class="letteringRows">
                   <article v-for="(panel, index) in episode.panels" v-show="letteringPanel === index" :key="panel.id" class="surface">
-                    <h3>第 {{ index + 1 }} 格 · 文字与位置</h3>
+                    <h3>第 {{ index + 1 }} 格 · 文字与位置</h3><div class="panelActions"><button class="secondaryButton" :disabled="index === 0" @click="movePanel(index, -1); letteringPanel = index - 1">前移一格</button><button class="secondaryButton" :disabled="index === episode.panels.length - 1" @click="movePanel(index, 1); letteringPanel = index + 1">后移一格</button></div>
                     <details><summary>旁白与音效 · 可选</summary><label :for="`letterCaption${index}`">画外旁白</label><textarea :id="`letterCaption${index}`" v-model="panel.caption" rows="2" maxlength="300" /><label :for="`letterSfx${index}`">音效字</label><input :id="`letterSfx${index}`" v-model="panel.sfx" maxlength="40" /></details>
                     <letteringEditor :panel="panel" :cast="episode.castSnapshot" :imageUrl="imageUrls[panel.image]" :textMode="episode.layout.textMode" :fontFamily="episode.layout.fontFamily" />
                   </article>
@@ -491,7 +496,7 @@
             </section>
 
             <section v-else-if="stage === 6 && episode">
-              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = 5">调整气泡与文字</button><button class="primaryButton" :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，预览中以占位图显示，字幕正常合成；补齐后即可导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
+              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = episode.productionMode === 'direct' ? 4 : 5">{{ episode.productionMode === 'direct' ? '修改台词并重绘' : '调整气泡与文字' }}</button><button class="primaryButton" :disabled="!productionReady(episode)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.productionMode === 'panels' && episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，预览中以占位图显示，字幕正常合成；补齐后即可导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
 
               <div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页成品预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div>
             </section>
@@ -531,7 +536,7 @@
                   </div>
                   <div>
                     <dt>图片完成</dt>
-                    <dd>{{ episode.panels.filter((panel) => panel.image).length }} / {{ episode.panels.length }} 格</dd>
+                    <dd>{{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).filter((panel) => panel.image).length }} / {{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).length }} {{ episode.productionMode === 'direct' ? '页' : '格' }}</dd>
                   </div>
                   <div>
                     <dt>美术版本</dt>
@@ -540,7 +545,7 @@
                 </dl>
                 <button
                   class="primaryButton"
-                  :disabled="!episode.panels.length || episode.panels.some((panel) => !panel.image)"
+                  :disabled="!productionReady(episode)"
                   @click="run('排版并导出发布包', exportPackage)">
                   <icon-download :size="17" />
                   导出 ZIP 发布包
@@ -558,13 +563,13 @@
           </fieldset>
 
           <footer class="stageFooter">
-            <button class="textButton" :disabled="stage === 0 || !!busy" @click="stage--">
+            <button class="textButton" :disabled="stage === 0 || !!busy" @click="stage = stage === 6 || stage === 5 ? 4 : stage - 1">
               <icon-arrow-left :size="16" />
               上一步
             </button>
-            <span>{{ stage + 1 }} / {{ stages.length }}</span>
-            <button class="primaryButton" :disabled="stage === stages.length - 1 || !!busy || !episode" @click="stage++">
-              {{ !episode ? (ideaMode === 'ownStory' ? '先保存自己的剧情' : '从剧情、原创灵感或热点开始') : stage === stages.length - 1 ? '已到最后一步' : `继续：${stages[stage + 1]!.title}` }}
+            <span>{{ stage >= 5 ? stage : stage + 1 }} / {{ stages.length - 1 }}</span>
+            <button class="primaryButton" :disabled="stage === stages.length - 1 || !!busy || !episode" @click="stage = stage === 4 || stage === 5 ? 6 : stage + 1">
+              {{ !episode ? (ideaMode === 'ownStory' ? '先保存自己的剧情' : '从剧情、原创灵感或热点开始') : stage === stages.length - 1 ? '已到最后一步' : `继续：${stages[stage === 4 || stage === 5 ? 6 : stage + 1]!.title}` }}
               <icon-arrow-right :size="16" />
             </button>
           </footer>
@@ -625,6 +630,8 @@
 </template>
 
 <script setup lang="ts">
+import directPageEditor from "./directPageEditor.vue";
+import { productionReady, directPageInput } from "./model";
 import { computed, onMounted, onBeforeUnmount, ref, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import axios from "axios";
@@ -796,6 +803,8 @@ const {
   adoptImage,
   panelGenerationIssue,
   generatePanel,
+  generateDirectPage,
+  resolveDirectPage,
   generateMissingPanels,
   exportCodexTask,
   preview,
@@ -885,7 +894,7 @@ const stages = [
   { title: "选题与脚本", icon: IconPencil, eyebrow: "WRITE", heading: "让话题，成为一个故事。", description: "核对事实素材，确定表达角度，完成故事与对白。" },
   { title: "分镜设计", icon: IconLayoutBoard, eyebrow: "STORYBOARD", heading: "把故事，一格一格展开。", description: "编排镜头、动作与对白，为每个画面做好准备。" },
   { title: "角色与美术", icon: IconUserSquareRounded, eyebrow: "ART DIRECTION", heading: "每个故事，都有自己的样子。", description: "先选本篇角色与画风，再用图片或一句话创建新资源。" },
-  { title: "分格出图", icon: IconPhoto, eyebrow: "GENERATE", heading: "让分镜，变成看得见的画面。", description: "逐格生成、导入和重画，保留每一次图片版本。" },
+  { title: "漫画制作", icon: IconPhoto, eyebrow: "GENERATE", heading: "让分镜，变成看得见的画面。", description: "整页直出或分格制作，在同一空间绘制、排字和比较版本。" },
   { title: "字幕与排版", icon: IconTypography, eyebrow: "COMPOSE", heading: "让画面和文字，好好说话。", description: "独立编辑对白与旁白，在实际尺寸中调整排版。" },
   { title: "整体预览", icon: IconChecklist, eyebrow: "REVIEW", heading: "看看完整效果，满意就导出。", description: "预览整体排版，随时返回微调，不需要逐格审批。" },
   { title: "导出发布", icon: IconPackageExport, eyebrow: "PUBLISH", heading: "把完成的故事，交给读者。", description: "打包成品、文案与来源，前往平台发布并记录作品。" },
@@ -911,6 +920,7 @@ watch([workspaceMode, () => project.value?.title], maybeCollect);
 onMounted(() => { collectionTimer = setInterval(maybeCollect, 60000); });
 onBeforeUnmount(() => clearInterval(collectionTimer));
 const letteringPanel = ref(0);
+watch([stage, () => episode.value?.productionMode], () => { if (stage.value === 5 && episode.value?.productionMode === "direct") stage.value = 4; });
 const largePreviewVisible = ref(false);
 watch(() => episode.value?.id, () => { letteringPanel.value = 0; });
 const studioColors = computed(() => ({ "--studioAccent": uiSettings.value.primaryColor, fontSize: `${14 * uiSettings.value.fontScale / 100}px` }));
@@ -935,7 +945,7 @@ function stageComplete(index: number) {
     Boolean(current.story),
     current.panels.length > 0,
     Boolean(current.styleSnapshot),
-    current.panels.length > 0 && current.panels.every((panel) => panel.image),
+    productionReady(current),
     previewUrls.value.length > 0,
     previewUrls.value.length > 0,
     Boolean(safeLink(current.publishedUrl)),
