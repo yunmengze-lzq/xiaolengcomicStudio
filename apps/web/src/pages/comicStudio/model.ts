@@ -91,6 +91,8 @@ const directPageSchema = panelSchema.extend({
   vertical: z.boolean().default(false),
 });
 const episodeSchema = z.object({
+  storyMode: z.enum(["satire", "science", "drama"]).default("satire"),
+  targetPanels: z.number().int().min(2).max(12).default(8),
   productionMode: z.enum(["panels", "direct"]).default("panels"),
   directPages: z.array(directPageSchema).max(50).default([]),
   id,
@@ -154,7 +156,7 @@ export const projectSchema = z.object({
   comicStudio: z.literal(1),
   title: z.string().min(1).max(100),
   topics: z.array(topicSchema).max(1000),
-  memeIdeas: z.array(memeIdeaSchema).max(6).default([]),
+  memeIdeas: z.array(memeIdeaSchema).max(12).default([]),
   styles: z.array(styleSchema).max(200),
   activeStyleId: z.string(),
   characters: z.array(characterSchema).max(30),
@@ -202,6 +204,8 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
   const style = project.styles.find((item) => item.id === project.activeStyleId) ?? null;
   return {
     id: crypto.randomUUID(),
+    storyMode: "satire",
+    targetPanels: 8,
     productionMode: "panels",
     directPages: [],
     continuityImage: "",
@@ -472,4 +476,34 @@ export function directPageInput(episode: Episode, page: Episode["directPages"][n
 export function productionReady(episode: Episode) {
   const images = episode.productionMode === "direct" ? episode.directPages : episode.panels;
   return images.length > 0 && images.every((item) => !!item.image);
+}
+
+
+export function bindStoryName(episode: Episode, sourceName: string, characterId: string) {
+  const person = episode.castSnapshot.find(item => item.id === characterId);
+  if (!person) throw new Error("请先选中要绑定的角色");
+  const previousId = episode.roleBindings[sourceName];
+  const previousName = episode.castSnapshot.find(item => item.id === previousId)?.name;
+  const names = [...new Set([sourceName, previousName, ...person.aliases.split(/[,，、;；\n]/).map(value => value.trim())].filter((value): value is string => !!value && value !== person.name))].sort((a, b) => b.length - a.length);
+  const replace = (text: string) => {
+    if (!names.length) return text;
+    const pattern = new RegExp(names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+    return text.replace(pattern, () => person.name);
+  };
+  episode.roleBindings[sourceName] = characterId;
+  person.aliases = [...new Set([...person.aliases.split(/[,，、;；\n]/), sourceName].filter(Boolean))].join("，");
+  episode.story = replace(episode.story);
+  for (const panel of episode.panels) {
+    const mentioned = names.some(name => panel.dialogue.includes(name) || panel.action.includes(name)) || !!previousId && panel.characters.includes(previousId);
+    if (mentioned) {
+      panel.characters = [...new Set(panel.characters.map(id => id === previousId ? characterId : id).concat(characterId))];
+      panel.performances.forEach(item => { if (item.characterId === previousId) item.characterId = characterId; });
+      panel.speech.forEach(item => { if (item.speakerId === previousId) item.speakerId = characterId; });
+      if (panel.actionSubjectId === previousId) panel.actionSubjectId = characterId;
+    }
+    for (const key of ["shot", "action", "dialogue", "caption", "actionInstruction", "revisionRequest", "imagePromptOverride"] as const) panel[key] = replace(panel[key]);
+    panel.performances.forEach(item => { item.thought = replace(item.thought); item.pose = replace(item.pose); });
+    panel.speech.forEach(item => { item.text = replace(item.text); });
+    if (!panel.speech.length) panel.speech = splitDialogue(panel, episode.castSnapshot);
+  }
 }

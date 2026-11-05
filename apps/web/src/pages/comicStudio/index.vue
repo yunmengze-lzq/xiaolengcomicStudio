@@ -169,16 +169,17 @@
                   添加话题与来源
                 </button>
               </div>
-              <div v-if="source === 'xhsLocal'" class="searchRow">
-                <label for="searchKeyword">想找哪类故事</label>
+              <div class="searchRow">
+                <label for="searchKeyword">主题关键词</label>
                 <input id="searchKeyword" v-model="searchKeyword" maxlength="80" placeholder="职场、情侣、MBTI、生活科普……" />
-                <span class="helperText">搜索最近一天、按点赞排序的笔记。</span>
+                <span class="helperText">具体词组比“热梗”更好，例如：职场反串、情侣嘴硬、生活冷知识。</span>
               </div>
               <p class="helperText" role="status">{{ sourceMessage || (source === 'douyin' ? '公开热榜提供热门线索；系统会据此提出原创剧情，原梗细节需看来源核对。' : '找到喜欢的题材后，选择一个方向开始制作。') }}</p>
               <div v-if="project.episodes.length" class="episodeStrip">
                 <span>继续已有作品</span>
                 <button v-for="item in project.episodes" :key="item.id" :class="{ selected: episode?.id === item.id }" @click="project.activeEpisodeId = item.id; stage = 1;">{{ item.title }}</button>
               </div>
+              <div class="surface"><h3>按主题收集可改编素材</h3><p class="helperText">跨平台搜索 → 尝试补充小红书文字正文 → 合并去重 → 生成最多 12 个改编方向。登录失败的平台会单独说明，只有标题的条目不会冒充完整剧本。</p><button class="primaryButton" :disabled="!!busy || !searchKeyword.trim()" @click="run('跨平台收集剧情素材', discoverAcrossPlatforms)">按关键词跨平台找梗</button><p v-if="researchStatus" role="status">{{ researchStatus }}</p></div>
               <section v-if="project.memeIdeas.length" class="surface">
                 <div class="sectionTitle">
                   <h2>剧情梗候选</h2>
@@ -283,7 +284,8 @@
                 </div>
                 <label for="episodeTitle">本期标题</label>
                 <input id="episodeTitle" v-model="episode.title" maxlength="200" />
-                <label for="direction">创作方向</label>
+                <label for="storyMode">这篇靠什么吸引读者？</label><select id="storyMode" v-model="episode.storyMode"><option value="satire">反串喜剧 · 一本正经抬杠、递进与回扣</option><option value="science">科普教学 · 讲懂原理、例子与边界</option><option value="drama">情感剧情 · 动机、潜台词与细节</option></select><label for="targetPanels">故事长度：{{ episode.targetPanels }} 格</label><input id="targetPanels" v-model.number="episode.targetPanels" type="range" min="2" max="12" /><p class="helperText">先确定内容与出场人物，再在角色与美术中选角；绑定后可统一更新剧情中的名字。</p>
+                <label for="direction">补充创作要求</label>
                 <textarea id="direction" v-model="episode.direction" rows="3"></textarea>
                 <label for="story">故事正文</label>
                 <textarea
@@ -374,13 +376,13 @@
               <p class="helperText">上方显示本篇选用；下方是可跨作品复用的公共库。保存档案后，可点击“更新本篇设定”同步修改。</p>
               <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">{{ textServiceLabel }} · 须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
               <artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
-              <section v-if="episode && storySpeakers.length" class="surface castingOverview"><h3>剧本人物 → 固定形象</h3><p>选择角色只加入本篇名单。在这里指定谁来出演，关联外形、性格和台词；之后仍可逐格微调。</p><div v-for="name in storySpeakers" :key="name"><label :for="`castRole${name}`">{{ name }}</label><select :id="`castRole${name}`" :value="castForSpeaker(name)" @change="run('调整剧本人物绑定', () => assignStoryRole(name, ($event.target as HTMLSelectElement).value))"><option value="">尚未绑定</option><option v-for="person in episode.castSnapshot" :key="person.id" :value="person.id">{{ person.name }} · {{ person.personality.slice(0, 25) || '未设性格' }}</option></select></div></section>
+              <section v-if="episode && storySpeakers.length" class="surface castingOverview"><h3>剧本人物 → 固定形象</h3><button class="secondaryButton" @click="run('统一剧情人物名', synchronizeCastNames)">将已绑定姓名同步到剧情与对白</button><p>选择角色只加入本篇名单。在这里指定谁来出演，关联外形、性格和台词；之后仍可逐格微调。</p><div v-for="name in storySpeakers" :key="name"><label :for="`castRole${name}`">{{ name }}</label><select :id="`castRole${name}`" :value="castForSpeaker(name)" @change="run('调整剧本人物绑定', () => assignStoryRole(name, ($event.target as HTMLSelectElement).value))"><option value="">尚未绑定</option><option v-for="person in episode.castSnapshot" :key="person.id" :value="person.id">{{ person.name }} · {{ person.personality.slice(0, 25) || '未设性格' }}</option></select><details v-if="castForSpeaker(name)"><summary>旧名与简称 · 需要时补充</summary><label>剧情中对这个人的其他称呼<input :value="episode.castSnapshot.find(person => person.id === castForSpeaker(name))?.aliases" @input="setStoryAliases(name, ($event.target as HTMLInputElement).value)" placeholder="例如：蓝原柚子，柚子" maxlength="500" /></label><p class="helperText">用逗号隔开；填写后点击上方同步姓名。不会猜测可能属于其他人物的简称。</p></details></div></section>
               <details v-if="episode" class="surface castingOverview"><summary>角色绑定 · 查看与调整每格出场人物</summary><p>选入公共库角色只加入本篇演员名单，不会自动替换已有分镜人物。下方可直接调整每格；对白说话者在分镜或字幕页调整。</p><div v-for="(panel, index) in episode.panels" :key="panel.id"><strong>第 {{ index + 1 }} 格</strong><span>{{ episode.castSnapshot.filter((person) => panel.characters.includes(person.id)).map((person) => person.name).join('、') || '未分配角色' }}</span><label v-for="person in episode.castSnapshot" :key="person.id"><input v-model="panel.characters" type="checkbox" :value="person.id" />{{ person.name }}</label><button class="textButton" @click="stage = 2">调整台词与表演</button></div></details>
               <p v-if="episode?.styleSnapshot" class="helperText">本篇画风：{{ episode.styleSnapshot.name }}。换画风用于后续生成，已有图片需重新绘制。{{ episode.panels.some((panel) => panel.imagePromptOverride) ? '注意：部分分格使用自定义提示词，会覆盖自动整理的画风描述，请在分格出图中检查。' : '' }}</p>
             </section>
 
             <section v-else-if="stage === 4 && episode">
-              <div class="surface productionModeBar"><h2>漫画制作</h2><div class="panelActions"><button :class="episode.productionMode === 'direct' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'direct'" @click="episode.productionMode = 'direct'">整页直出 · 含对白</button><button :class="episode.productionMode === 'panels' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'panels'" @click="episode.productionMode = 'panels'">分格制作 · 可编辑排版</button><button v-if="episode.productionMode === 'panels'" class="secondaryButton" @click="stage = 5">排版与气泡 →</button></div><p class="helperText">整页一次生成完整漫画；分格先画无字画面，再拼页、移动气泡。两种模式分别保留图片。</p></div>
+              <div class="surface productionModeBar"><h2>漫画制作</h2><p class="helperText">整页：每张都是含对白的成品漫画，可连续生成多张。分格：每张只有一个无字画面，随后拼页排字。</p><div class="panelActions"><button :class="episode.productionMode === 'direct' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'direct'" @click="episode.productionMode = 'direct'">整页直出 · 含对白</button><button :class="episode.productionMode === 'panels' ? 'primaryButton' : 'secondaryButton'" :aria-pressed="episode.productionMode === 'panels'" @click="episode.productionMode = 'panels'">分格制作 · 可编辑排版</button><button v-if="episode.productionMode === 'panels'" class="secondaryButton" @click="stage = 5">② 拼页与气泡</button></div><p class="helperText">整页一次生成完整漫画；分格先画无字画面，再拼页、移动气泡。两种模式分别保留图片。</p></div>
               <div class="toolbar">
                 <div class="inlineFields">
                   <label for="imageModel">图片服务</label>
@@ -399,13 +401,14 @@
                   手动协作：导出任务包
                 </button>
               </div>
-              <directPageEditor v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
+              <directPageEditor v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" :stopRequested="stopDirectBatch" @generateAll="run('连续生成漫画页', generateDirectPages)" @stop="stopDirectBatch = true" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
               <template v-else>
               <p class="helperText">
                 <template v-if="imageModel === 'zImage/turbo4bit'">本地默认把角色外形摘要、性格和分镜动作合成文字后重绘，支持多人。普通图生图会保留设定图布局，所以仅用于明确选择的旧图修订；本地身份一致性仍需审核。</template><template v-else-if="imageModel === 'fluxKlein/klein4bit'">本机多参考编辑会实际读取本格每位角色的正式图，按顺序绑定剧情人物；保留参考图服装和外形，仅改变场景、动作与表情。最多4位角色，生成后仍需对照原图审核。</template><template v-else>直接生成会携带本期画风、固定角色与上一格参考图。Codex 内置生图需联网，使用当前 CLI 账号额度，单格通常需要数分钟。</template>重画先保存候选版，比较后再采用；请检查人物、动作和道具连续性。
               </p>
-              <div class="imageGrid">
-                <article v-for="(panel, index) in episode.panels" :key="panel.id" class="imageCard">
+              <div class="letteringTabs drawingTabs" aria-label="选择要绘制的画面"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: drawingPanel === index }" :aria-pressed="drawingPanel === index" @click="drawingPanel = index"><img v-if="panel.image" :src="imageUrls[panel.image]" alt="" /><span>第 {{ index + 1 }} 格 · {{ panel.image ? '已有图' : '待生成' }}</span></button></div>
+              <div class="imageGrid singlePanelGrid">
+                <article v-for="(panel, index) in episode.panels" v-show="drawingPanel === index" :key="panel.id" class="imageCard">
                   <div class="panelArt">
                     <img v-if="panel.image" :src="imageUrls[panel.image]" :alt="`第${index + 1}格漫画`" />
                     <span v-else>
@@ -467,7 +470,7 @@
 
             <section v-else-if="stage === 5 && episode" class="layoutStage">
               <div class="surface layoutControls">
-                <div class="panelActions"><button class="secondaryButton" @click="stage = 4">← 漫画制作 · 绘制画面</button><strong>分格制作 / 排版与气泡</strong></div><h2>页面与文字</h2>
+                <div class="panelActions"><button class="secondaryButton" @click="stage = 4">① 绘制无字小图</button><button class="primaryButton" aria-current="step">② 拼页与气泡</button><button class="secondaryButton" @click="stage = 6">③ 预览导出</button></div><h2>页面与文字</h2>
                 <div class="layoutControlGrid">
                   <div><label for="perPage">每页格数</label><select id="perPage" v-model="episode.layout.perPage"><option :value="1">1 格 / 页</option><option :value="2">2 格 / 页</option><option :value="4">4 格 / 页</option></select></div>
                   <div><label for="pageArrangement">拼页方式</label><select id="pageArrangement" :value="episode.layout.arrangement || 'grid'" @change="episode.layout.arrangement = ($event.target as HTMLSelectElement).value as 'grid' | 'vertical' | 'horizontal'"><option value="grid">标准分格</option><option value="vertical">上下排列</option><option value="horizontal">左右排列</option></select></div><div><label for="pageGutter">画格间距 {{ episode.layout.gutter ?? 24 }} px</label><input id="pageGutter" :value="episode.layout.gutter ?? 24" @input="episode.layout.gutter = Number(($event.target as HTMLInputElement).value)" type="range" min="8" max="60" /></div>
@@ -631,7 +634,7 @@
 
 <script setup lang="ts">
 import directPageEditor from "./directPageEditor.vue";
-import { productionReady, directPageInput } from "./model";
+import { productionReady, directPageInput, bindStoryName } from "./model";
 import { computed, onMounted, onBeforeUnmount, ref, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import axios from "axios";
@@ -793,6 +796,7 @@ const {
   discoverProjects,
   refreshTopics,
   discoverMemes,
+  discoverAcrossPlatforms,
   selectMeme,
   selectTopic,
   putImage,
@@ -804,6 +808,8 @@ const {
   panelGenerationIssue,
   generatePanel,
   generateDirectPage,
+  generateDirectPages,
+  stopDirectBatch,
   resolveDirectPage,
   generateMissingPanels,
   exportCodexTask,
@@ -920,6 +926,8 @@ watch([workspaceMode, () => project.value?.title], maybeCollect);
 onMounted(() => { collectionTimer = setInterval(maybeCollect, 60000); });
 onBeforeUnmount(() => clearInterval(collectionTimer));
 const letteringPanel = ref(0);
+const drawingPanel = ref(0);
+watch(() => episode.value?.id, () => { drawingPanel.value = 0; });
 watch([stage, () => episode.value?.productionMode], () => { if (stage.value === 5 && episode.value?.productionMode === "direct") stage.value = 4; });
 const largePreviewVisible = ref(false);
 watch(() => episode.value?.id, () => { letteringPanel.value = 0; });
@@ -1027,7 +1035,12 @@ function activateUpload(event: KeyboardEvent) {
 }
 const textServiceLabel = computed(() => textMode.value === "codex" ? `Codex CLI · ${codexModel.value || "默认模型"}` : textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value)?.label || textModel.value || "尚未配置文本模型");
 const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : `图片分析：${textServiceLabel.value}`);
-const storySpeakers = computed(() => [...new Set((episode.value?.panels || []).flatMap((panel) => panel.dialogue.split("\n").map((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name)))]);
+const storySpeakers = computed(() => {
+  const current = episode.value;
+  if (!current) return [];
+  const names = current.panels.flatMap(panel => panel.dialogue.split("\n").map(line => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name));
+  return [...new Set([...Object.keys(current.roleBindings), ...names])].filter(name => !Object.entries(current.roleBindings).some(([original, id]) => original !== name && current.castSnapshot.find(person => person.id === id)?.name === name));
+});
 function castForSpeaker(name: string) {
   if (episode.value && Object.hasOwn(episode.value.roleBindings, name)) return episode.value.roleBindings[name] || "";
   const matches = episode.value?.castSnapshot.filter((person) => [person.name, ...person.aliases.split(/[,，、;；\n]/)].some((alias) => alias.trim() === name)) || [];
@@ -1036,29 +1049,32 @@ function castForSpeaker(name: string) {
 async function assignStoryRole(name: string, id: string) {
   const current = episode.value;
   if (!current) return;
-  const oldId = castForSpeaker(name);
-  current.roleBindings[name] = id;
-  for (const person of current.castSnapshot) person.aliases = person.aliases.split(/[,，、;；\n]/).filter((alias) => alias.trim() && alias.trim() !== name).join("，");
-  const person = current.castSnapshot.find((item) => item.id === id);
-  if (person && person.name !== name) person.aliases = [person.aliases, name].filter(Boolean).join("，");
-  for (const panel of current.panels) {
-    const mentioned = panel.dialogue.split("\n").some((line) => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim() === name) || panel.action.includes(name);
-    if (!mentioned) continue;
-    if (oldId && oldId !== id) {
-      panel.characters = panel.characters.filter((value) => value !== oldId);
-      panel.performances.forEach((acting) => { if (acting.characterId === oldId && id) acting.characterId = id; });
-      if (panel.actionSubjectId === oldId) panel.actionSubjectId = id;
+  if (!id) {
+    const oldId = castForSpeaker(name);
+    const oldName = current.castSnapshot.find(person => person.id === oldId)?.name;
+    const restore = (text: string) => oldName ? text.split(oldName).join(name) : text;
+    current.story = restore(current.story);
+    for (const panel of current.panels) {
+      panel.characters = panel.characters.filter(value => value !== oldId);
+      panel.performances = panel.performances.filter(item => item.characterId !== oldId);
+      if (panel.actionSubjectId === oldId) panel.actionSubjectId = "";
+      panel.speech.forEach(line => { if (line.speakerId === oldId) line.speakerId = ""; line.text = restore(line.text); });
+      for (const key of ["dialogue", "action", "shot", "caption", "imagePromptOverride", "actionInstruction"] as const) panel[key] = restore(panel[key]);
     }
-    if (id && !panel.characters.includes(id)) panel.characters.push(id);
-    if (!panel.speech.length) panel.speech = splitDialogue(panel, current.castSnapshot);
-    const dialogueLines = panel.dialogue.split("\n").filter((line) => line.trim());
-    panel.speech.filter((line) => line.kind === "dialogue").forEach((line, index) => {
-      const match = dialogueLines[index]?.match(/^([^：:]{1,30})[：:]\s*(.*)$/);
-      if (match?.[1]?.trim() === name) { line.speakerId = id; line.text = match[2] || ""; }
-    });
+    current.roleBindings[name] = "";
+    await save(); return;
   }
+  if (Object.entries(current.roleBindings).some(([role, bound]) => role !== name && bound === id)) throw new Error("这个人物已绑定另一位剧情角色，请选择不同人物");
+  bindStoryName(current, name, id);
   await save();
 }
+function setStoryAliases(name: string, value: string) { const person = episode.value?.castSnapshot.find(item => item.id === castForSpeaker(name)); if (person) person.aliases = value; }
+async function synchronizeCastNames() {
+  if (!episode.value) return;
+  for (const [name, id] of Object.entries(episode.value.roleBindings)) if (id) bindStoryName(episode.value, name, id);
+  await save();
+}
+
 function syncSpeechActor(panel: Panel, index: number) {
   const speech = panel.speech[index];
   if (!speech) return;
@@ -1110,6 +1126,7 @@ async function applyLibraryItem(kind: "characters" | "styles", source: Character
     project.value.activeStyleId = item.id;
     if (episode.value) episode.value.styleSnapshot = structuredClone(item);
   }
+  if (episode.value) for (const [name, id] of Object.entries(episode.value.roleBindings)) if (id && episode.value.castSnapshot.some(person => person.id === id)) bindStoryName(episode.value, name, id);
   await save();
 }
 function uploadPanel(event: Event, panel: Panel) {
@@ -2501,6 +2518,8 @@ onMounted(() => {
   .presetGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .presetCard { border: 1px solid var(--studioLine); border-radius: 10px; overflow: hidden; background: var(--studioCard); button { display: grid; width: 100%; gap: 7px; padding: 12px; color: var(--studioInk); background: transparent; border: 0; text-align: left; cursor: pointer; svg { width: 100%; height: auto; } strong { font-size: 15px; } small { color: var(--studioMuted); } } a { display: block; font-size: 12px; padding: 0 12px 12px; color: var(--studioAccent); } &:hover, &:focus-within { outline: 2px solid var(--studioAccent); outline-offset: 1px; } }
   .productionStatus { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; button { border: 1px solid var(--studioLine); border-radius: 18px; background: var(--studioCard); color: var(--studioInk); padding: 7px 12px; min-height: 36px; cursor: pointer; } }
+  .drawingTabs { margin: 16px 0; button { display: grid; gap: 6px; } img { width: 72px; height: 90px; object-fit: contain; } }
+  .singlePanelGrid { grid-template-columns: minmax(0, 1fr); .imageCard { max-width: 900px; } .panelArt { max-height: 620px; } }
   .layoutWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
   .letteringTabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; button { border: 1px solid var(--studioLine); background: var(--studioCard); color: var(--studioInk); border-radius: 7px; padding: 9px 13px; cursor: pointer; &.selected { background: var(--studioAccent); color: white; } } }
   .pagePreviewColumn { min-width: 0; position: sticky; top: 20px; h3 { margin-top: 0; } .pagePreviews { display: grid; grid-template-columns: 1fr; margin-top: 10px; img { cursor: zoom-in; } } }

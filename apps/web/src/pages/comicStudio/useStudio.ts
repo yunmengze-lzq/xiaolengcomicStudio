@@ -312,6 +312,8 @@ export default function useStudio() {
     const { data } = await axios.post("/api/comicStudio/sourceText", { url: material.url }, { headers: { "x-toonflow-workspace": "1" }, timeout: 100000 });
     if (directorySnapshot !== directory.value) throw new Error("空间已切换，正文未写入");
     material.summary = `【笔记文字正文，非视频字幕；采集于${data.data.collectedAt}】\n${data.data.text}\n${data.data.limitation}`.slice(0, 20000);
+    const topic = project.value?.topics.find(item => item.id === material.id);
+    if (topic) topic.summary = material.summary;
     await save();
     researchStatus.value = "已读取笔记文字正文；生成原创脚本时会带入所选素材包。";
   }
@@ -559,10 +561,13 @@ export default function useStudio() {
     analysisStatus.value = `${new Date().toLocaleTimeString("zh-CN")} · ${messages.join("；")}`;
   }
 
-  async function discoverMemes() {
-    const fresh = await refreshTopics();
+  async function discoverMemes(useCollected = false) {
+    const fresh = useCollected ? project.value?.topics : await refreshTopics();
     if (!project.value) return;
-    const candidates = (fresh || []).filter((item) => item.kind === "hotSearch" || item.kind === "search").slice(0, 80);
+    const unique = [...new Map((fresh || []).filter(item => item.kind === "hotSearch" || item.kind === "search").map(item => [item.url || item.title, item])).values()];
+    const sources = [...new Set(unique.map(item => item.source))];
+    const groups = sources.map(source => unique.filter(item => item.source === source).sort((a, b) => Number(b.summary.includes("文字正文")) - Number(a.summary.includes("文字正文"))));
+    const candidates = Array.from({ length: Math.max(0, ...groups.map(group => group.length)) }, (_, index) => groups.flatMap(group => group[index] ? [group[index]!] : [])).flat().slice(0, 80);
     if (!candidates.length) throw new Error("请选择抖音热榜或小红书来源，先获取平台候选");
     const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
     busy.value = "分析生活与剧情梗的改编潜力…";
@@ -577,14 +582,14 @@ export default function useStudio() {
         candidates: candidates.map((item) => ({
           id: item.id,
           title: item.title,
-          summary: item.summary.slice(0, 2000),
+          summary: item.summary.slice(0, 4000),
           source: item.source,
           metric: item.metric,
         })),
       },
       { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 },
     );
-    const result = z.object({ ideas: z.array(memeIdeaSchema).max(6) }).parse(data.data);
+    const result = z.object({ ideas: z.array(memeIdeaSchema).max(12) }).parse(data.data);
     const known = new Set(candidates.map((item) => item.id));
     if (result.ideas.some((item) => !known.has(item.topicId))) throw new Error("选梗结果引用了未知来源，当前结果未被替换");
     project.value.memeIdeas = result.ideas.map((item) => ({ ...item, createdAt: new Date().toISOString() }));
@@ -592,11 +597,33 @@ export default function useStudio() {
     if (!result.ideas.length) ElMessage.info("这批候选没有合适的剧情梗，可换关键词或来源。没有强行生成推荐。");
   }
 
+  async function discoverAcrossPlatforms() {
+    await collectResearch(searchKeyword.value, ["douyin", "bilibili", "xhsLocal", "tieba", "douban"]);
+    const pack = project.value?.researchPacks[0];
+    if (!pack) return;
+    const targetDirectory = directory.value;
+    const notes = pack.materials.filter(item => item.url.includes("xiaohongshu.com/explore/")).slice(0, 3);
+    const results = await Promise.allSettled(notes.map(async material => {
+      const { data } = await axios.post("/api/comicStudio/sourceText", { url: material.url }, { headers: { "x-toonflow-workspace": "1" }, timeout: 30000 });
+      return { material, text: `【笔记文字正文，非视频字幕】\n${data.data.text}\n${data.data.limitation}`.slice(0, 20000) };
+    }));
+    if (directory.value !== targetDirectory) throw new Error("空间已切换，素材未写入");
+    for (const result of results) if (result.status === "fulfilled") {
+      result.value.material.summary = result.value.text;
+      const topic = project.value?.topics.find(item => item.id === result.value.material.id);
+      if (topic) topic.summary = result.value.text;
+    }
+    researchStatus.value += `；补充正文 ${results.filter(item => item.status === "fulfilled").length}/${notes.length} 条（其余保留标题线索）`;
+    await save();
+    await discoverMemes(true);
+  }
+
   async function selectMeme(idea: MemeIdea) {
     const topic = project.value?.topics.find((item) => item.id === idea.topicId);
     if (!topic || !project.value) throw new Error("原始线索已不在候选中，请重新收集");
     const created = createEpisode(project.value, topic);
     created.title = idea.hook.slice(0, 200);
+    created.researchPackId = project.value.researchPacks.find(pack => pack.materials.some(item => item.id === idea.topicId))?.id || "";
     created.topic.summary = `原创虚构改编，仅借关键词作灵感，不代表来源原文或真实事件。\n原始线索平台：${created.topic.source}\n${created.topic.summary}`.slice(0, 20000);
     created.topic.source = "原创灵感";
     created.topic.verified = true;
@@ -730,6 +757,8 @@ export default function useStudio() {
         directory: directory.value,
         mode: textMode.value,
         topic: JSON.stringify(current.topic),
+        storyMode: current.storyMode,
+        targetPanels: current.targetPanels,
         direction: `${current.direction}\n创作者偏好：${project.value?.creator.interests || ""}\n避免：${project.value?.creator.avoid || ""}`.slice(0, 5000),
         style: current.styleSnapshot?.description || "",
         characters: castContext,
@@ -963,6 +992,18 @@ export default function useStudio() {
     const asset = project.value?.assets.find((item) => item.path === path);
     if (asset) Object.assign(asset, { method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件分镜生成", license: "待按供应商条款确认用途", seed: generated.seed, prompt: generationPrompt, model: `${model.providerId}/${model.modelId}` });
     await save();
+  }
+
+  const stopDirectBatch = ref(false);
+  async function generateDirectPages() {
+    const pending = episode.value?.directPages.filter(page => !page.image && !page.candidate) || [];
+    if (!pending.length) throw new Error("没有待生成页面，请先自动分页或添加新页");
+    stopDirectBatch.value = false;
+    for (const [index, page] of pending.entries()) {
+      if (stopDirectBatch.value) break;
+      busy.value = `整页生成 ${index + 1}/${pending.length}`;
+      await generateDirectPage(page);
+    }
   }
 
   async function generateDirectPage(page: NonNullable<typeof episode.value>["directPages"][number]) {
@@ -1218,6 +1259,7 @@ export default function useStudio() {
     discoverProjects,
     refreshTopics,
     discoverMemes,
+    discoverAcrossPlatforms,
     selectMeme,
     selectTopic,
     putImage,
@@ -1228,6 +1270,8 @@ export default function useStudio() {
     panelGenerationIssue,
     generatePanel,
     generateDirectPage,
+    generateDirectPages,
+    stopDirectBatch,
     resolveDirectPage,
     generateMissingPanels,
     exportCodexTask,

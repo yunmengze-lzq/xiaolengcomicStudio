@@ -1,9 +1,10 @@
 <template>
   <div class="directWorkspace">
     <div class="pageToolbar"><div><h2>整页直出</h2><p>选择本页分镜，检查对白，再生成完整漫画。文字与画面一起绘制，改字后需要重绘。</p></div><button :disabled="busy || !episode.panels.length || episode.directPages.length >= 50" @click="addPage">添加一页</button></div>
-    <p class="modelNotice">中文准确度和多人物一致性取决于所选模型。本地小模型可能出现错字或漏格；需要精准文字时请选择分格制作。每次按钮只生成这一页。</p>
+    <div class="pageToolbar"><label>每页画面数<select v-model.number="episode.layout.perPage" :disabled="busy"><option :value="1">1 个画面</option><option :value="2">2 个画面</option><option :value="4">4 个画面</option></select></label><button :disabled="busy || !episode.panels.length" @click="planPages">自动补齐分页</button><button :disabled="busy || !episode.directPages.some(page => !page.image && !page.candidate)" @click="$emit('generateAll')">连续生成 {{ episode.directPages.filter(page => !page.image && !page.candidate).length }} 张漫画页</button><button v-if="busy" :disabled="stopRequested" @click="$emit('stop')">{{ stopRequested ? '将在本页完成后停止' : '本页完成后停止' }}</button></div>
+    <p class="modelNotice">中文准确度和多人物一致性取决于所选模型。本地小模型可能出现错字或漏格；需要精准文字时请选择分格制作。单页按钮只生成这一页；连续生成只处理尚未出图的页。</p>
     <details v-if="episode.panels.some(panel => panel.image)"><summary>已有图片本身就是完整漫画？直接作为整页使用</summary><p>适合已经包含画框和对白的图片。保留原分格图片，不再重复拼格或叠加字幕。请选择其实际对应的分镜后再重绘。</p><div class="historyImages"><button v-for="(panel, index) in episode.panels.filter(panel => panel.image)" :key="panel.id" :disabled="busy || episode.directPages.length >= 50 || episode.directPages.some(page => page.image === panel.image)" @click="useExisting(panel)"><img :src="imageUrls[panel.image]" :alt="`已有图片 ${index + 1}`" />作为整页使用</button></div></details>
-    <div class="pageTabs"><button v-for="(page, index) in episode.directPages" :key="page.id" :aria-pressed="selected === page.id" @click="selected = page.id">第 {{ index + 1 }} 页 · {{ page.image ? '已出图' : '待出图' }}</button></div>
+    <div class="pageTabs"><button v-for="(page, index) in episode.directPages" :key="page.id" :aria-pressed="selected === page.id" @click="selected = page.id"><img v-if="page.image" :src="imageUrls[page.image]" alt="" />第 {{ index + 1 }} 页 · {{ page.image ? '已出图' : '待出图' }}</button></div>
     <p v-if="!episode.directPages.length">还没有整页，点击“添加一页”。分格模式已有的图片会保留。</p>
     <article v-for="page in episode.directPages" v-show="selected === page.id" :key="page.id" class="pageEditor">
       <div class="pageScript">
@@ -37,10 +38,18 @@ import { ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
 import { newPanel, directPageInput } from "./model";
 import type { Episode, Panel } from "./model";
-const props = defineProps<{ episode: Episode; imageUrls: Record<string, string>; busy: boolean; progress: { panelId: string; phase: string; elapsedSeconds: number } }>();
-const emit = defineEmits<{ import: [page: Episode["directPages"][number], file: File]; generate: [page: Episode["directPages"][number]]; resolve: [page: Episode["directPages"][number], accept: boolean] }>();
+const props = defineProps<{ episode: Episode; imageUrls: Record<string, string>; busy: boolean; stopRequested: boolean; progress: { panelId: string; phase: string; elapsedSeconds: number } }>();
+const emit = defineEmits<{ generateAll: []; stop: []; import: [page: Episode["directPages"][number], file: File]; generate: [page: Episode["directPages"][number]]; resolve: [page: Episode["directPages"][number], accept: boolean] }>();
 const selected = ref("");
 watch(() => props.episode.id, () => { selected.value = props.episode.directPages[0]?.id || ""; }, { immediate: true });
+function planPages() {
+  const used = new Set(props.episode.directPages.flatMap(page => page.panelIds));
+  const remaining = props.episode.panels.filter(panel => !used.has(panel.id));
+  for (let offset = 0; offset < remaining.length && props.episode.directPages.length < 50; offset += props.episode.layout.perPage) {
+    props.episode.directPages.push({ ...newPanel(), panelIds: remaining.slice(offset, offset + props.episode.layout.perPage).map(panel => panel.id), vertical: false });
+  }
+  selected.value ||= props.episode.directPages[0]?.id || "";
+}
 function addPage() {
   const used = new Set(props.episode.directPages.flatMap(page => page.panelIds));
   const panels = props.episode.panels.filter(panel => !used.has(panel.id));
@@ -63,7 +72,7 @@ async function removePage(page: Episode["directPages"][number]) {
 <style scoped>
 .directWorkspace { display: grid; gap: 16px; min-width: 0; overflow-wrap: anywhere; }
 .pageToolbar, .pageTabs { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
-.pageTabs { justify-content: flex-start; }
+.pageTabs { justify-content: flex-start; }.pageTabs button { display: grid; gap: 8px; min-width: 110px; }.pageTabs img { width: 90px; height: 120px; object-fit: contain; }
 button { border: 1px solid #b8cabc; border-radius: 8px; padding: 10px 14px; background: #f5f8f4; color: #244c35; cursor: pointer; }
 button[aria-pressed="true"] { background: #315c42; color: white; }
 button:disabled { opacity: .5; cursor: not-allowed; }
