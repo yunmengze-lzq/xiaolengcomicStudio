@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { stat, readdir } from "@toonflow/file";
 import conf from "@/utils/conf";
 
+export const localImageRuntime = { generating: false };
 export const zImageRoot = () => resolve(dirname(conf.path), "localModels/zImage");
 export async function zImageStatus(engine: "zImage" | "fluxKlein" = "zImage") {
   const klein = engine === "fluxKlein";

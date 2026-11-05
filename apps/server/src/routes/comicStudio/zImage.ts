@@ -8,10 +8,10 @@ import conf from "@/utils/conf";
 import { validateFields } from "@/lib/middleware";
 import { success } from "@/lib/responseFormat";
 import { resolveWorkspacePath } from "@/utils/workspace/files";
-import { zImageStatus } from "@/utils/comicStudio/zImage";
+import { zImageStatus, localImageRuntime } from "@/utils/comicStudio/zImage";
 
 const inputSchema = z.object({ directory: z.string().min(1).max(4096), providerId: z.enum(["zImage", "fluxKlein"]).default("zImage"), prompt: z.string().min(1).max(30000), images: z.array(z.object({ path: z.string().min(1).max(4096) })).max(12).default([]), quality: z.enum(["draft", "standard", "detail"]).default("standard") });
-let running = false;
+import { modelSetupStatus } from "@/utils/comicStudio/modelSetup";
 export default Router().post("/", validateFields(inputSchema.shape), async (req, res) => {
   u.mcpControl.assertAppRequest(req);
   if (!u.workspace.isLocalWorkspaceRequest(req)) throw Object.assign(new Error("仅允许本机运行本地生图"), { status: 403 });
@@ -20,11 +20,12 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
   const seed = crypto.getRandomValues(new Uint32Array(1))[0]! >>> 1;
   const size = { draft: { width: 384, height: 512 }, standard: { width: 768, height: 1024 }, detail: { width: 896, height: 1152 } }[input.quality];
   const directory = await u.workspace.resolveWorkspace(req, input.directory);
-  if (running) throw Object.assign(new Error("本地模型正在生成，请等待当前任务完成"), { status: 409 });
+  if (localImageRuntime.generating || modelSetupStatus().running) throw Object.assign(new Error("本地模型正在生成，请等待当前任务完成"), { status: 409 });
   const runtime = await zImageStatus(input.providerId);
   if (!runtime.installed || !runtime.modelReady) throw new Error(`请先在本地模型设置检查 ${klein ? "FLUX.2 klein" : "Z-Image"} 环境与模型下载状态`);
   if (input.images.length > (klein ? 4 : 1)) throw new Error(klein ? "本地 FLUX.2 klein 一次最多使用4张参考，请减少画风或连续性参考" : "本地 Z-Image 当前仅支持单张图生图参考，不支持多角色参考图锁定。请改用支持多参考图的服务，或减少参考图。");
-  running = true;
+  if (localImageRuntime.generating || modelSetupStatus().running) throw Object.assign(new Error("本地模型正在生成或安装，请稍后再试"), { status: 409 });
+  localImageRuntime.generating = true;
   const controller = new AbortController();
   const cancel = () => controller.abort();
   res.once("close", cancel);
@@ -65,5 +66,5 @@ export default Router().post("/", validateFields(inputSchema.shape), async (req,
     await writeFile((await resolveWorkspacePath(directory, path)).path, bytes, { mode: 0o600, flag: "wx" });
     console.info("[comicLocalImage]", { model: runtime.model, references: references.length, quality: input.quality, ...size, steps, elapsedMs: Date.now() - started });
     res.json(success([{ path, mimeType: "image/png", seed }]));
-  } finally { running = false; res.off("close", cancel); req.off("aborted", cancel); }
+  } finally { localImageRuntime.generating = false; res.off("close", cancel); req.off("aborted", cancel); }
 });

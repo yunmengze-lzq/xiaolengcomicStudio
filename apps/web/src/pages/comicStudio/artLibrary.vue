@@ -1,7 +1,7 @@
 <template>
   <section class="artLibrary" aria-label="公共美术库">
+    <section class="selectedTray" aria-label="本篇已选资源"><strong>{{ kind === 'characters' ? `本篇已选 ${selectedItems.length} 位角色` : '本篇画风' }}</strong><p v-if="!selectedItems.length">{{ kind === 'characters' ? '尚未选择角色，请从下方选用。' : '尚未选择画风，请从下方选用。' }}</p><div class="selectedItems"><div v-for="item in selectedItems" :key="item.id"><img v-if="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :src="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :alt="item.name" /><span>{{ item.name }}</span><button class="textButton" :disabled="working" :aria-label="`取消选用${item.name}`" @click="perform(() => remove(kind, item.id))">× 取消</button></div></div><small>选用只影响本篇；编辑后可通过卡片“更多”更新本篇设定。</small></section>
     <header><div><h2>{{ kind === 'characters' ? '我的角色' : '我的画风' }}</h2><p>所有创作空间共用 · 保存一次，随时复用</p></div><button class="primaryButton" :disabled="working" @click="createItem">{{ kind === 'characters' ? '新建角色' : '新建画风' }}</button></header>
-    <section class="selectedTray" aria-label="本篇已选资源"><strong>{{ kind === 'characters' ? `本篇已选 ${selectedItems.length} 位角色` : '本篇画风' }}</strong><p v-if="!selectedItems.length">{{ kind === 'characters' ? '尚未选择角色，请从下方选用。' : '尚未选择画风，请从下方选用。' }}</p><div class="selectedItems"><div v-for="item in selectedItems" :key="item.id"><img v-if="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :src="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :alt="item.name" /><span>{{ item.name }}</span><button class="textButton" :disabled="working" :aria-label="`取消选用${item.name}`" @click="perform(() => remove(kind, item.id))">× 取消</button></div></div><small>取消只移除本篇选用；公共库与已生成图片保留。</small></section>
     <div class="libraryTools"><input v-model="query" :aria-label="kind === 'characters' ? '搜索公共角色' : '搜索公共画风'" placeholder="搜索名称或描述" /><label><input v-model="showDeleted" type="checkbox" />回收站</label><button class="textButton" :disabled="working" @click="perform(load)">刷新</button></div>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" role="alert" class="libraryError">{{ error }}</p>
@@ -10,16 +10,17 @@
       <article v-for="item in visibleItems" :key="item.id" :class="{ selectedCard: selectedItems.some((row) => row.id === item.id) }">
         <button class="libraryPreview" :aria-label="`编辑${item.name}`" :disabled="working || showDeleted" @click="editItem(item)"><img v-if="preview(item)" :src="preview(item)" :alt="`${item.name}实例图`" /><span v-else>暂无实例图 · 编辑后添加</span></button>
         <div class="libraryCardBody"><h3>{{ item.name }} <span v-if="selectedItems.some((row) => row.id === item.id)" class="selectedBadge">✓ 已选</span></h3><p>{{ 'personality' in item ? item.personality || '尚未填写性格' : item.description }}</p><small>{{ 'image' in item ? '公共角色档案' : item.refs.length ? '含参考图与画风说明' : '文字画风 · 尚无参考图' }}</small>
-          <div class="libraryActions" v-if="!showDeleted"><button class="primaryButton" :disabled="working" @click="useItem(item)">{{ selectedItems.some((row) => row.id === item.id) ? '更新本篇设定' : '选用于本篇' }}</button><button class="textButton" :disabled="working" @click="editItem(item)">编辑</button><button class="textButton" :disabled="working" @click="trash(item.id)">删除</button></div>
+          <div class="libraryActions" v-if="!showDeleted"><button class="primaryButton" :disabled="working" @click="selectedItems.some(row => row.id === item.id) ? perform(() => remove(kind, item.id)) : useItem(item)">{{ selectedItems.some(row => row.id === item.id) ? '取消选用' : '选用于本篇' }}</button><button class="textButton" :disabled="working" @click="editItem(item)">编辑</button><details class="cardMore"><summary>更多</summary><button v-if="selectedItems.some(row => row.id === item.id)" class="textButton" :disabled="working" @click="useItem(item)">更新本篇设定</button><button class="textButton" :disabled="working" @click="trash(item.id)">移到回收站</button></details></div>
           <button v-else class="secondaryButton" :disabled="working" @click="restore(item.id)">恢复</button>
         </div>
       </article>
     </div>
     <p v-if="!visibleItems.length && !working" class="helperText">{{ showDeleted ? '回收站为空' : query ? '没有匹配的内容' : '从新建开始，保存后的内容会出现在这里。' }}</p>
     <details v-if="kind === 'styles'" class="textPresets"><summary>文字预设 · 可选起点</summary><div><button v-for="preset in textPresets" :key="preset.id" class="textButton" @click="createStyle(preset)">{{ preset.name }}</button></div><p>仅填入描述；生成或上传实例图后，保存到“我的画风”。</p></details>
-    <el-dialog v-model="editorOpen" :title="editorKind === 'characters' ? '角色档案' : '画风档案'" width="min(760px, 94vw)" :closeOnClickModal="false" :beforeClose="closeEditor">
+    <el-dialog v-model="editorOpen" :title="editorKind === 'characters' ? '角色档案' : '画风档案'" width="min(1040px, 94vw)" :closeOnClickModal="false" :beforeClose="closeEditor">
       <div v-if="draft" class="libraryEditor">
-        <section class="creationBrief">
+        <div class="designWorkspace"><div class="designSettings">
+        <details class="creationBrief" :open="briefingOpen" @toggle="briefingOpen = ($event.target as HTMLDetailsElement).open"><summary>1 · 创作起点 <small>用一句话或参考图整理设定</small></summary><div class="briefFields">
           <div class="creationModes" role="tablist" aria-label="创作方式"><button role="tab" :aria-selected="creationMode === 'text'" :class="{ active: creationMode === 'text' }" @click="creationMode = 'text'">文字创作</button><button role="tab" :aria-selected="creationMode === 'image'" :class="{ active: creationMode === 'image' }" @click="creationMode = 'image'">图片参考</button></div>
           <p>{{ creationMode === 'text' ? '描述想法，AI整理设定；不会把已有角色图片作为图生图输入。' : '上传参考图，说明保留或改变什么，再提取设定。' }}</p>
           <template v-if="creationMode === 'image'"><label class="secondaryButton">选择参考图片<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="working" @change="upload" /></label><div class="inputReferences"><img v-for="path in draftPaths.slice(0, 4)" :key="path" :src="urls[path]" alt="本次分析参考图" /></div><label v-if="'referenceIntent' in draft">参考目的<select v-model="draft.referenceIntent"><option value="redesign">提取元素，重新设计</option><option value="identity">保持人物，改变姿态</option><option value="style">只参考画风</option></select></label></template>
@@ -27,25 +28,28 @@
           <template v-if="editorKind === 'characters'"><label>生成画风<select v-model="creationStyleId"><option value="">按描述中的画风</option><option v-for="style in availableStyles" :key="style.id" :value="style.id">{{ style.name }}</option></select></label><div v-if="creationStyle" class="styleChoice"><img v-if="preview(creationStyle)" :src="preview(creationStyle)" :alt="creationStyle.name" /><div><strong>{{ creationStyle.name }}</strong><p>{{ preview(creationStyle) ? '使用此画风的描述与参考图' : '文字画风，尚无预览图' }}</p><details><summary>画风描述</summary><p>{{ creationStyle.description }}</p></details></div></div></template>
           <details v-else><summary>从网上找参考图</summary><label>画风关键词<input v-model="searchTerms" placeholder="如 watercolor illustration / anime" /></label><button class="secondaryButton" :disabled="working || !searchTerms.trim()" @click="findExamples">搜索案例</button><div class="exampleGrid"><article v-for="example in examples" :key="example.title"><img :src="example.thumbnail" :alt="example.title" /><p>{{ example.title }}</p><a :href="example.source" target="_blank" rel="noopener noreferrer">来源与授权</a><button class="secondaryButton" :disabled="working" @click="chooseExample(example)">选中并分析</button></article></div><p v-if="searchMessage" role="status">{{ searchMessage }}</p></details>
           <button class="secondaryButton" :disabled="working" @click="analyze">{{ working ? '处理中…' : '整理设定' }}</button>
-        </section>
-        <h3>确认设定</h3>
+        </div></details>
+        <section class="designIdentity"><h3>2 · 微调设定</h3>
         <label>名称<input v-model="draft.name" maxlength="100" /></label>
         <label>{{ editorKind === 'characters' ? '角色外形' : '画风描述' }}<textarea v-model="draft.description" rows="3" maxlength="20000" /></label>
         <label v-if="'personality' in draft">性格与习惯<textarea v-model="draft.personality" rows="3" maxlength="1500" /></label>
         <details class="advancedDesign"><summary>更多设定 · {{ editorKind === 'characters' ? '对白、动机与细节' : '排除的效果' }}</summary><template v-if="'personality' in draft"><label>对白语气<textarea v-model="draft.speechStyle" rows="2" maxlength="1000" /></label><label>动机<textarea v-model="draft.motivation" rows="2" maxlength="1000" /></label><label>剧情别名<input v-model="draft.aliases" maxlength="500" /></label><label>固定外形摘要<textarea v-model="draft.visualSummary" rows="2" maxlength="1000" /></label><label>补充画风<textarea v-model="draft.artDirection" rows="2" maxlength="1000" /></label></template><label v-else>避免的效果<textarea v-model="draft.avoid" rows="2" maxlength="20000" /></label></details>
+        </section></div><aside class="designPreview"><h3>3 · 效果预览</h3>
+        <div class="editorImages"><figure v-if="preview(draft)"><img :src="preview(draft)" alt="当前正式预览" /><figcaption>{{ 'image' in draft ? '正式形象' : '画风预览' }}</figcaption></figure><div v-else class="designEmpty"><strong>预览将在这里出现</strong><p>整理设定并微调，再生成参考图。</p></div></div>
         <div class="generationControls"><label v-if="'designView' in draft">输出形式<select v-model="draft.designView"><option value="fullBody">单人立绘</option><option value="turnaround">三视图</option><option value="sheet">角色设定图</option><option value="expressions">表情图</option><option value="portrait">头像</option></select></label><button class="primaryButton" :disabled="working || !imageModel?.configured" @click="generate">根据当前设定生成预览</button></div>
         <details><summary>本次调用服务</summary><p>{{ analysisLabel }}；出图：{{ imageModel?.label || '尚未配置' }}。仅点击才调用。</p></details>
-        <div class="editorImages"><figure v-if="preview(draft)"><img :src="preview(draft)" alt="当前正式预览" /><figcaption>{{ 'image' in draft ? '正式形象' : '画风预览' }}</figcaption></figure></div>
         <details v-if="draftPaths.length"><summary>管理图片 · {{ draftPaths.length }} 张</summary><div class="editorImages"><figure v-for="path in draftPaths" :key="path"><img :src="urls[path]" alt="档案图片" /><button v-if="'image' in draft && draft.image !== path" class="textButton" @click="draft.image = path">设为正式图</button><button class="textButton" @click="removeImage(path)">移除</button></figure></div></details>
+        </aside></div>
+        <p v-if="message" role="status">{{ message }}</p>
         <p v-if="error" role="alert" class="libraryError">{{ error }}</p>
-        <div class="editorFooter"><button class="secondaryButton" :disabled="working" @click="closeEditor(() => editorOpen = false)">取消</button><button class="primaryButton" :disabled="working" @click="saveDraft">保存到公共库</button></div>
+        <div class="editorFooter"><small>保存后加入公共库；需要用于作品时，再选用于本篇。</small><button class="secondaryButton" :disabled="working" @click="closeEditor(() => editorOpen = false)">取消</button><button class="primaryButton" :disabled="working" @click="saveDraft">保存到公共库</button></div>
       </div>
     </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import axios from "axios";
 import { z } from "zod";
 import { ElMessageBox } from "element-plus";
@@ -78,11 +82,13 @@ type Example = { title: string; thumbnail: string; source: string };
 const examples = ref<Example[]>([]);
 const working = ref(false);
 const showDeleted = ref(false);
+watch(() => props.kind, () => { query.value = ""; showDeleted.value = false; });
 const error = ref("");
 const message = ref("");
 const draft = ref<Character | ArtStyle>();
 const editorKind = ref<"characters" | "styles">("characters");
 const editorOpen = ref(false);
+const briefingOpen = ref(false);
 let initialDraft = "";
 const textPresets = [dailyAnimeStyle, ...stylePresets];
 const visibleItems = computed(() => library.value[props.kind].filter((item) => library.value.deleted.includes(item.id) === showDeleted.value && `${item.name} ${item.description}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
@@ -125,7 +131,7 @@ async function persist(next: z.infer<typeof schema>) {
   library.value = valid;
 }
 async function perform(action: () => Promise<void>) { if (working.value) return; working.value = true; error.value = ""; try { await action(); } catch (cause: any) { error.value = cause.response?.data?.message || cause.message || "操作失败"; } finally { working.value = false; } }
-function editItem(item: Character | ArtStyle) { draft.value = structuredClone(JSON.parse(JSON.stringify(item))); editorKind.value = props.kind; creationMode.value = paths(item).length ? "image" : "text"; brief.value = ""; examples.value = []; searchMessage.value = ""; creationStyleId.value = props.activeStyleId || ""; initialDraft = JSON.stringify(draft.value); editorOpen.value = true; }
+function editItem(item: Character | ArtStyle) { briefingOpen.value = !item.description.trim(); message.value = ""; error.value = ""; draft.value = structuredClone(JSON.parse(JSON.stringify(item))); editorKind.value = props.kind; creationMode.value = paths(item).length ? "image" : "text"; brief.value = ""; examples.value = []; searchMessage.value = ""; creationStyleId.value = props.activeStyleId || ""; initialDraft = JSON.stringify(draft.value); editorOpen.value = true; }
 function createItem() { editItem(props.kind === "characters" ? characterSchema.parse({ id: crypto.randomUUID(), name: "新角色", description: "", image: "", designView: "fullBody", referenceIntent: "redesign" }) : styleSchema.parse({ id: crypto.randomUUID(), name: "新画风", description: "", avoid: "", createdAt: new Date().toISOString(), refs: [] })); }
 function createStyle(preset: { name: string; description: string; avoid: string }) { createItem(); if (draft.value) Object.assign(draft.value, preset, { id: crypto.randomUUID() }); }
 async function closeEditor(done: () => void) { if (working.value) return; if (JSON.stringify(draft.value) !== initialDraft && !await ElMessageBox.confirm("尚未保存，放弃这次编辑？", "关闭编辑", { confirmButtonText: "放弃编辑", cancelButtonText: "继续编辑" }).then(() => true, () => false)) return; done(); }
@@ -150,6 +156,7 @@ async function analyzeDraft() {
   const parsed = resultSchema.parse(result);
   if ("personality" in item) Object.assign(item, { name: parsed.name, description: parsed.description, visualSummary: parsed.visualSummary, personality: parsed.personality, motivation: parsed.motivation, speechStyle: parsed.speechStyle, aliases: parsed.aliases.replace(/[;；]/g, "，"), artDirection: creationStyle.value?.description.slice(0, 1000) || parsed.artDirection, referenceAnalysis: parsed.analysis });
   else Object.assign(item, { name: parsed.name, description: `${parsed.description}\n${parsed.analysis}`, avoid: parsed.avoid });
+  briefingOpen.value = false;
   message.value = "已整理设定，可微调性格、外形与对白后再生成";
 }
 async function analyze() { await perform(analyzeDraft); }
@@ -190,4 +197,8 @@ onBeforeUnmount(() => Object.values(urls).forEach(URL.revokeObjectURL));
 .libraryEditor { display: grid; gap: 16px; label { display: grid; gap: 6px; } p { margin: 0; font-size: 13px; color: #68756d; } .editorColumns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; } .editorImages { display: flex; flex-wrap: wrap; gap: 12px; figure { margin:0; width:160px; img { width:100%; height:120px; object-fit:contain; } } } .editorFooter { display:flex; justify-content:flex-end; gap:12px; } }
 .artLibrary, .libraryEditor { input:not([type=checkbox]):not([type=file]), textarea, select { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #ccd5cc; border-radius:7px; color:#203b2c; background:#fff; font:inherit; } button { cursor:pointer; } summary { cursor:pointer; } .primaryButton,.secondaryButton { padding:10px 14px; border-radius:7px; border:1px solid #587261; background:#fff; color:#244631; } .primaryButton { background:#365c44; color:white; } .textButton { background:none; border:0; color:#365c44; padding:8px 4px; } button:disabled { opacity:.5; cursor:default; } .libraryError { color:#a83d32; } button:focus-visible { outline:2px solid #34765b; outline-offset:3px; } }
 @media(max-width:600px) { .artLibrary { padding:16px; } .libraryEditor .editorColumns { grid-template-columns:1fr; } }
+
+.artLibrary { padding: 18px; .selectedTray { margin: 0 0 20px; padding: 12px 16px; .selectedItems { margin: 8px 0; } small { font-size: 11px; color: #667964; } } header h2 { font-size: 18px; } header p { margin: 0; font-size: 12px; }.libraryTools { margin: 14px 0; }.libraryCards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }.libraryPreview { height: 200px; }.libraryCardBody { padding: 12px; h3 { font-size: 14px; } } .libraryActions { gap: 8px; font-size: 12px; }.cardMore { font-size: 12px; margin-left: auto; summary { padding: 8px 0; cursor: pointer; } button { display: block; } } }
+.libraryEditor { .designWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }.designSettings { min-width: 0; }.creationBrief { display: block; padding: 14px; margin-bottom: 18px; summary { font-weight: 600; font-size: 14px; small { font-weight: normal; font-size: 11px; margin-left: 8px; color: #68756d; } } .briefFields { display: grid; gap: 12px; margin-top: 14px; } }.designIdentity { display: grid; gap: 14px; h3 { margin: 0; font-size: 14px; } }.designPreview { position: sticky; top: 0; background: #f0f3ec; border-radius: 12px; padding: 16px; min-width: 0; h3 { margin: 0 0 12px; font-size: 14px; } > .editorImages { margin-bottom: 16px; figure { width: 100%; img { height: 280px; background: white; border-radius: 8px; } figcaption { text-align: center; font-size: 12px; color: #657560; padding-top: 6px; } } } .generationControls { display: grid; gap: 12px; } details { margin-top: 14px; summary { font-size: 12px; padding: 6px 0; } } }.designEmpty { width: 100%; min-height: 260px; display: flex; flex-direction: column; justify-content: center; text-align: center; gap: 12px; background: white; border-radius: 8px; padding: 20px; box-sizing: border-box; color: #71806a; }.editorFooter { position: sticky; bottom: 0; background: white; border-top: 1px solid #dce3d7; padding-top: 14px; small { margin-right: auto; color: #71806a; font-size: 11px; max-width: 50%; } } }
+@media(max-width:800px) { .libraryEditor { .designWorkspace { grid-template-columns: 1fr; } .designPreview { position: static; } } }
 </style>

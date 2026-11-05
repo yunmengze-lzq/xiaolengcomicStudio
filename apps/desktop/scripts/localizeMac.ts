@@ -58,6 +58,6 @@ if (process.env.ELECTROBUN_OS === "macos") {
   const resourceDir = join(bundlePath, "Contents", "Resources", "zh-Hans.lproj");
   mkdirSync(resourceDir, { recursive: true });
   writeFileSync(join(resourceDir, "InfoPlist.strings"),
-    `CFBundleName = ${JSON.stringify(bundleName)};\nCFBundleDisplayName = ${JSON.stringify(bundleName)};\n`);
+    `CFBundleName = ${JSON.stringify("小冷漫画")};\nCFBundleDisplayName = ${JSON.stringify("小冷漫画")};\n`);
   console.log(`已设置 macOS 简体中文本地化：${bundlePath}`);
 }

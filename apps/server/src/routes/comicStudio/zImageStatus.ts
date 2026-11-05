@@ -1,3 +1,4 @@
+import { totalmem } from "node:os";
 import { Router } from "express";
 import u from "@/utils";
 import { success } from "@/lib/responseFormat";
@@ -8,5 +9,5 @@ export default Router().get("/", async (req, res) => {
   if (!u.workspace.isLocalWorkspaceRequest(req)) throw Object.assign(new Error("仅允许本机查看本地模型状态"), { status: 403 });
   const { installed, modelReady, root, binary } = await zImageStatus();
   const fluxKlein = await zImageStatus("fluxKlein");
-  res.json(success({ installed, modelReady, root, binary, fluxKlein: { installed: fluxKlein.installed, modelReady: fluxKlein.modelReady, root: fluxKlein.root }, message: !installed ? "尚未安装本地 MLX 环境" : !modelReady ? "MLX 环境已安装，模型尚在下载或未下载完整" : "Z-Image Turbo 4-bit 已就绪 · 本机运行，无 API 费用" }));
+  res.json(success({ system: { platform: process.platform, arch: process.arch, memoryGb: Math.round(totalmem() / 1024 ** 3) }, installed, modelReady, root, binary, fluxKlein: { installed: fluxKlein.installed, modelReady: fluxKlein.modelReady, root: fluxKlein.root }, message: !installed ? "尚未安装本地 MLX 环境" : !modelReady ? "MLX 环境已安装，模型尚在下载或未下载完整" : "Z-Image Turbo 4-bit 已就绪 · 本机运行，无 API 费用" }));
 });

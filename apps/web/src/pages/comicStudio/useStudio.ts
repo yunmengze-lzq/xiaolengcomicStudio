@@ -767,7 +767,7 @@ export default function useStudio() {
         codexModel: textMode.value === "codex" ? codexModel.value || undefined : undefined,
         reasoningEffort: textEffort.value,
         context: JSON.stringify({
-          suppliedStory: current.sourceStory ? current.story.slice(0, 10000) : undefined,
+          suppliedStory: current.story.trim() ? current.story.slice(0, 10000) : undefined,
           series: project.value ? { title: project.value.series.title, bible: project.value.series.bible.slice(0, 3000), looseEnds: project.value.series.looseEnds.slice(0, 1500) } : undefined,
           previousEpisodes: (() => { const chain = []; let parent = current.parentEpisodeId; const seen = new Set<string>(); while (parent && chain.length < 5 && !seen.has(parent)) { seen.add(parent); const work = project.value?.episodes.find((item) => item.id === parent); if (!work) break; chain.unshift({ title: work.title, episodeNumber: work.episodeNumber, story: work.story.slice(0, 1200) }); parent = work.parentEpisodeId; } return chain; })(),
           research: (() => { const pack = project.value?.researchPacks.find((item) => item.id === current.researchPackId); return pack ? { keyword: pack.keyword, notes: pack.notes.slice(0, 2500), sources: [...pack.materials].sort((a, b) => Number(b.summary.includes("【笔记文字正文")) - Number(a.summary.includes("【笔记文字正文"))).slice(0, 8).map((item) => ({ title: item.title, url: item.url, summary: item.summary.slice(0, 1000), source: item.source })) } : undefined; })(),

@@ -8,18 +8,19 @@
       <img v-if="imageUrl" :src="imageUrl" alt="当前分格，拖动图内气泡可调整排字位置" />
       <div v-if="!imageUrl" class="missingArtwork">待配图 · 可先安排字幕</div>
       <template v-if="textMode === 'overlay'">
-        <button v-for="line in panel.speech" :key="line.id" class="draggableBubble" :class="{ darkBubble: line.tone === 'dark' }" :style="{ left: `${line.x * 100}%`, top: `${line.y * 100}%`, width: `${line.width * 100}%` }" :aria-label="`移动${speakerName(line.speakerId) || '对白'}气泡，方向键微调`" @click="activeSpeechId = line.id" @pointerdown="activeSpeechId = line.id; startDrag($event, line)" @keydown="nudge($event, line)"><svg class="bubbleOutline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="bubblePath(line.shape, 100, 100, line.kind === 'dialogue' ? line.tail : 'none', line.tailLength)" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.5" vector-effect="non-scaling-stroke" /><g v-if="line.kind === 'thought'" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.2" vector-effect="non-scaling-stroke"><circle cx="23" cy="108" r="3.5" /><circle cx="18" cy="119" r="2" /></g></svg><span :class="{ verticalText: line.vertical }">{{ line.text }}</span></button>
+        <button v-for="line in panel.speech" :key="line.id" class="draggableBubble" :class="{ darkBubble: line.tone === 'dark', activeBubble: activeSpeechId === line.id }" :style="{ left: `${line.x * 100}%`, top: `${line.y * 100}%`, width: `${line.width * 100}%` }" :aria-label="`移动${speakerName(line.speakerId) || '对白'}气泡，方向键微调`" @click="activeSpeechId = line.id" @pointerdown="activeSpeechId = line.id; startDrag($event, line)" @keydown="nudge($event, line)"><svg class="bubbleOutline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path :d="bubblePath(line.shape, 100, 100, line.kind === 'dialogue' ? line.tail : 'none', line.tailLength)" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.5" vector-effect="non-scaling-stroke" /><g v-if="line.kind === 'thought'" :fill="line.tone === 'dark' ? '#202228' : '#fffefa'" stroke="#202228" stroke-width="1.2" vector-effect="non-scaling-stroke"><circle cx="23" cy="108" r="3.5" /><circle cx="18" cy="119" r="2" /></g></svg><span :class="{ verticalText: line.vertical }">{{ line.text }}</span></button>
         <span v-if="!panel.speech.length && panel.dialogue" class="legacyBubble" :style="{ left: `${panel.bubbleX * 100}%`, top: `${panel.bubbleY * 100}%` }">{{ panel.dialogue }}</span>
       </template>
       <div v-if="panel.caption" class="captionPreview">{{ panel.caption }}</div>
     </div>
+    <div class="bubbleInspector">
     <p v-if="fontError" role="alert">{{ fontError }}</p>
     <p class="editorHint">{{ textMode === 'safe' ? '对白在画面之外排布，自动分列，不遮人物。下方为编辑示意，成品预览采用最终字号与分格尺寸。' : '拖动气泡或用方向键微调。请避开人脸和关键动作；最终尺寸与重叠检查以成品预览为准。' }}</p>
     <div class="editorToolbar">
 
       <button :disabled="panel.speech.length >= 6" @click="addSpeech">添加气泡</button><button :disabled="panel.speech.length >= 6 || !panel.performances.some((item) => item.thought.trim())" @click="importThoughts">从分镜添加心声</button>
     </div>
-    <div class="speechTabs" role="tablist" aria-label="选择气泡"><button v-for="(line, index) in panel.speech" :key="line.id" role="tab" :aria-selected="activeSpeechId === line.id" :class="{ selected: activeSpeechId === line.id }" @click="activeSpeechId = line.id">{{ index + 1 }} · {{ line.kind === 'thought' ? '心声' : line.kind === 'narration' ? '旁白' : '对白' }} {{ line.text.slice(0, 12) || '新气泡' }}</button></div>
+    <label v-if="panel.speech.length" class="speechPicker">编辑气泡<select v-model="activeSpeechId"><option v-for="(line, index) in panel.speech" :key="line.id" :value="line.id">{{ index + 1 }} · {{ line.kind === 'thought' ? '心声' : line.kind === 'narration' ? '旁白' : '对白' }} {{ line.text.slice(0, 16) || '新气泡' }}</option></select></label>
     <p v-if="!panel.speech.length" class="editorHint">本格暂无气泡，点击“添加气泡”开始。</p>
     <div v-for="(line, index) in panel.speech" v-show="activeSpeechId === line.id" :key="line.id" class="speechRow">
       <label :for="`speaker${line.id}`">气泡 {{ index + 1 }} · 说话角色</label>
@@ -35,6 +36,7 @@
       <template v-if="textMode === 'overlay' && line.kind === 'dialogue' && line.tail !== 'none'"><label :for="`tailLength${line.id}`">尾巴长度</label><input :id="`tailLength${line.id}`" :value="line.tailLength ?? .2" @input="line.tailLength = Number(($event.target as HTMLInputElement).value)" type="range" min="0.05" max="0.5" step="0.01" /></template>
 </div></details>
       <button @click="panel.speech.splice(index, 1); activeSpeechId = panel.speech[0]?.id || ''; synchronize()">移除此气泡</button>
+    </div>
     </div>
   </div>
 </template>
@@ -111,4 +113,12 @@ function nudge(event: KeyboardEvent, line: Speech) {
   button { border: 1px solid #c7d4cb; border-radius: 6px; min-height: 38px; background: #f6f8f4; color: #294937; padding: 7px 10px; cursor: pointer; }
   .speechRow { display: grid; gap: 6px; padding: 12px; margin-top: 12px; border: 1px solid #dde6de; border-radius: 8px; label { font-size: 12px; } select, textarea { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; color: inherit; background: transparent; border: 1px solid #c8d4cb; border-radius: 5px; } }
 }
+
+.letteringEditor { display: grid; grid-template-columns: minmax(200px, 1fr) 260px; gap: 20px; align-items: start; }
+.bubbleInspector { min-width: 0; }
+.speechPicker { display: grid; gap: 6px; margin: 12px 0; font-size: 12px; }
+.speechPicker select { width: 100%; padding: 9px; border: 1px solid #ccd8ce; border-radius: 6px; background: white; font: inherit; }
+.draggableBubble.activeBubble { outline: 2px dashed #527b58; outline-offset: 5px; }
+@media (max-width: 1100px) { .letteringEditor { grid-template-columns: minmax(160px, 1fr) 220px; gap: 12px; } }
+@media (max-width: 760px) { .letteringEditor { grid-template-columns: 1fr; } }
 </style>
