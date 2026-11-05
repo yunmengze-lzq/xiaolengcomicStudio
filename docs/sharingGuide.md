@@ -28,7 +28,7 @@ MLX 安装仅支持 Apple Silicon Mac。权重取自 Hugging Face 上 `mlx-commu
 桌面版数据独立于安装包：
 
 - macOS：`~/Library/Application Support/xiaolengComic/data`
-- Windows 设计路径：`%LOCALAPPDATA%/xiaolengComic/data`，未在 Windows 验证。
+- Windows 设计路径：安装目录下的 `data`，与安装器的重装、卸载逻辑保持一致，未在 Windows 真机验证。
 - 开发环境继续使用仓库 `data`；可通过已有 `TOONFLOW_DATA_DIR` 指定目录。新桌面包不会自动导入开发目录，避免把个人数据带给朋友。
 
 应用包不包含开发机的项目、角色库、平台登录、API 密钥和模型权重。自己迁移时应先备份数据，再选择性迁移项目与资源；不要把整个个人 data 发给朋友。普通 GitHub 源码备份同样不包含 data。

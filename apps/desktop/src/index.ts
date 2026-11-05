@@ -80,7 +80,7 @@ async function start() {
     const installDirectory = resolve(PATHS.RESOURCES_FOLDER, process.platform === "darwin" ? "../../.." : "../..");
     // 用户数据与安装包分离，应用位于只读 DMG 或 Applications 时仍可保存。
     const userDataRoot = process.platform === "darwin" ? resolve(homedir(), "Library/Application Support") : process.env.LOCALAPPDATA || resolve(homedir(), "AppData/Local");
-    const dataDirectory = process.env.TOONFLOW_DATA_DIR ?? resolve(userDataRoot, "xiaolengComic/data");
+    const dataDirectory = process.env.TOONFLOW_DATA_DIR ?? (process.platform === "darwin" ? resolve(userDataRoot, "xiaolengComic/data") : resolve(installDirectory, "data"));
     // ACT: 先显示原生动画，再加载服务，避免初始化期间没有反馈。
     const startupSettings = await file(resolve(dataDirectory, "settings.json")).json().catch((error) => {
       if (error.code !== "ENOENT") console.error("读取启动设置失败，使用默认启动动画：", error);
