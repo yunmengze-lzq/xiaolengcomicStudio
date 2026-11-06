@@ -1,6 +1,6 @@
 # 小冷漫画分享与安装计划
 
-更新：2026-11-05。
+更新：2026-11-06。
 
 ## 本轮可交付内容
 
@@ -50,3 +50,14 @@ MLX 安装仅支持 Apple Silicon Mac。权重取自 Hugging Face 上 `mlx-commu
 5. 完成签名、公证、版本号和带校验值的 Release，再扩大分发。
 
 图片流程改造依据见 [图片工作流调研](imageWorkflowResearch.md)。优先区域参考、候选采用和遮罩局修；不承诺参考图或固定 seed 能绝对保证身份一致。
+
+
+## Windows 2.0.1 测试包
+
+Windows x64 云端构建已通过：[构建记录](https://github.com/yunmengze-lzq/xiaolengcomicStudio/actions/runs/42046017998)，源码提交 `e6596b6`。安装器已改为小冷漫画，数据仍放在安装目录的 `data`，与重装及卸载逻辑一致。
+
+构建产物中的 `toonflow-2.0.1-Setup.exe` 为历史脚本文件名，实际安装界面为小冷漫画；分享副本可命名为 `xiaolengComic2.0.1Setup.exe`，二进制内容不变。不要将更新用的 tar.zst/JSON 当作普通安装包。
+
+分享给朋友：发送安装 exe 或含 exe 与说明的 zip；朋友解压后运行安装程序，进入设置配置自己的文本/识图模型及生图服务。在线 API 不需要安装本地生图权重；Windows 本地生图走 ComfyUI 安装引导，MLX 安装入口仅用于 Apple Silicon Mac。包内不含模型权重、开发机数据或密钥。
+
+Windows 安装包尚未完成真实桌面安装、启动和卸载验收，且没有代码签名。先作为小范围测试包分享；系统拦截时不要要求朋友关闭安全软件，应核对来源、校验值与具体提示。Mac 当前仍是此前 2.0.0 Apple Silicon 测试包，不要把两个平台版本号混为同一验收版本。
