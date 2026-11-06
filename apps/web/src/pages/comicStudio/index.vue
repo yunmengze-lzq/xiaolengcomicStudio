@@ -27,10 +27,10 @@
             <icon-chevron-right v-if="!sidebarCollapsed" class="groupChevron" :size="15" :class="{ rotated: expandedSections.has('studio') }" aria-hidden="true" />
           </button>
           <div v-if="expandedSections.has('studio') && !sidebarCollapsed" id="studioNavigation" class="stageNav">
-            <button v-for="(item, index) in stages" v-show="index !== 5" :key="item.title" :class="{ active: workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) }" :aria-current="workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) ? 'page' : undefined" :aria-label="`${String(index > 5 ? index : index + 1).padStart(2, '0')} ${item.title}${stageComplete(index) ? '，已完成' : ''}`" :disabled="!project || !!busy" @click="workspaceMode = 'studio'; stage = index">
+            <button v-for="({ item, index }, position) in workflowStages" :key="item.title" :class="{ active: workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) }" :aria-current="workspaceMode === 'studio' && (stage === index || stage === 5 && index === 4) ? 'page' : undefined" :aria-label="`${String(position + 1).padStart(2, '0')} ${item.title}${stageComplete(index) ? '，已完成' : ''}`" :disabled="!project || !!busy" @click="workspaceMode = 'studio'; stage = index">
               <component :is="item.icon" :size="18" stroke="1.7" class="navIcon" aria-hidden="true" />
               <span class="navText">{{ item.title }}</span>
-              <span class="stageNumber" aria-hidden="true">{{ String(index > 5 ? index : index + 1).padStart(2, '0') }}</span>
+              <span class="stageNumber" aria-hidden="true">{{ String(position + 1).padStart(2, '0') }}</span>
               <icon-check v-if="stageComplete(index)" class="stageDone" :size="14" aria-hidden="true" />
             </button>
           </div>
@@ -56,7 +56,7 @@
         </section>
       </nav>
       <div class="sidebarBottom">
-        <button aria-label="设置" title="设置" @click="openSettings('comicOverview')">
+        <button aria-label="设置" title="设置" @click="openSettings('comicDefaults')">
           <icon-adjustments :size="18" />
           设置
         </button>
@@ -100,7 +100,7 @@
             创建第一个漫画项目
           </button>
           <div class="welcomeFlow">
-            <span v-for="(item, index) in stages" :key="item.title">
+            <span v-for="({ item }, index) in workflowStages" :key="item.title">
               <b>{{ String(index + 1).padStart(2, "0") }}</b>
               {{ item.title }}
             </span>
@@ -132,6 +132,7 @@
           </div>
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
           <div v-if="busy.startsWith('整页生成 ')" class="batchControl" role="status"><span>{{ busy }} · 不覆盖已有页面</span><button class="secondaryButton" :disabled="stopDirectBatch" @click="stopDirectBatch = true">{{ stopDirectBatch ? '当前页结束后停止' : '当前页完成后停止' }}</button></div>
+          <div v-if="busy && [0, 1, 2, 3].includes(stage)" class="taskWaiting" role="status" aria-live="polite"><progress aria-label="任务处理中"></progress><div><strong>{{ busy }}</strong><p>正在处理，请稍候。文本模型可能需要数分钟；完成后会自动显示结果，请勿重复提交。</p></div></div>
           <fieldset class="stageFields" :disabled="!!busy || saving">
             <section v-if="stage === 0" class="topicsStage">
               <header class="discoveryHeader"><div><span class="eyebrow">START A STORY</span><h1>今天，想画什么故事？</h1><p>带着自己的想法开始，或从生活热点里找灵感。</p></div><details v-if="project.episodes.length" class="resumeStories"><summary>继续已有作品 · {{ project.episodes.length }}</summary><button v-for="item in project.episodes" :key="item.id" @click="project.activeEpisodeId = item.id; stage = 1">{{ item.title }}</button></details></header>
@@ -229,14 +230,14 @@
             </section>
 
             <section v-else-if="stage === 1 && episode" class="writingWorkspace">
-              <header class="productionHeader"><div><h2>先把故事讲好</h2><p>编辑正文，确定表达方向，再细化每格画面。</p></div><button class="secondaryButton" @click="stage = 2">查看分镜 · {{ episode.panels.length }} 格 →</button></header>
+              <header class="productionHeader"><div><h2>先把故事讲好</h2><p>先完成正文和人物清单，再绑定形象，最后生成分镜。</p></div><button class="secondaryButton" @click="stage = 3">绑定角色 · {{ episode.scriptRoles.length || episode.castSnapshot.length }} 位 →</button></header>
               <div v-if="!episode.topic.verified" class="writingNotice"><span>{{ hasOnlyTopicClue ? '当前只有热点线索，请先确定如何使用。' : '来源尚未核对，请选择创作方式。' }}</span><button class="textButton" @click="useTopicAsInspiration">只借关键词写原创</button><button class="textButton" @click="scriptSourceOpen = true">补充并核对来源</button></div>
               <p v-if="scriptIssue" class="scriptIssue" role="alert">{{ scriptIssue }}</p>
               <div class="writingColumns">
                 <div class="surface manuscript"><div class="sectionTitle"><h3>故事正文</h3><span>{{ episode.story.length }} 字 · 可直接编辑</span></div><label for="episodeTitle">作品标题</label><input id="episodeTitle" v-model="episode.title" maxlength="200" /><label for="story">正文与角色对话</label><textarea id="story" v-model="episode.story" class="storyEditor" rows="18" placeholder="写下故事和人物对话，也可以在右侧设置方向后使用 AI 创作。" /><p class="helperText">正文与分镜分别保存。修改正文后，已有分镜不会自动覆盖。</p></div>
                 <aside class="writingInspector">
                   <section class="surface"><h3>创作方向</h3><label for="storyMode">这篇靠什么吸引读者？</label><select id="storyMode" v-model="episode.storyMode"><option value="satire">反串喜剧 · 抬杠、递进与回扣</option><option value="science">科普教学 · 原理、例子与边界</option><option value="drama">情感剧情 · 动机、潜台词与细节</option></select><label for="targetPanels">计划长度 · {{ episode.targetPanels }} 格</label><input id="targetPanels" v-model.number="episode.targetPanels" type="range" min="2" max="12" /><label for="direction">补充要求</label><textarea id="direction" v-model="episode.direction" rows="3" placeholder="你想要的笑点、知识点或情感变化……" />
-                  <button class="primaryButton writeAction" @click="requestStory"><icon-sparkles :size="16" />{{ episode.story.trim() ? '按正文生成分镜' : '生成脚本与分镜' }}</button><p class="helperText">{{ episode.panels.length ? '重新生成前会确认，并保留历史快照。' : '点击才调用文本模型，也可以手动添加分镜。' }}</p>
+                  <button class="primaryButton writeAction" @click="requestStory"><icon-sparkles :size="16" />{{ episode.story.trim() ? '整理脚本与人物清单' : '生成脚本与人物清单' }}</button><p class="helperText">{{ episode.panels.length ? '重新生成前会确认，并保留历史快照。' : '点击才调用文本模型，也可以手动添加分镜。' }}</p>
                   <details class="writingDetails"><summary>文本模型 · {{ textMode === 'codex' ? `Codex · ${codexModel || '默认'}` : textModels.find(item => `${item.providerId}/${item.modelId}` === textModel)?.label || '未配置' }}</summary><p class="helperText">{{ textMode === 'codex' ? '通过本机 CLI 联网调用，使用当前账号额度。' : '使用设置中选择的 API 或本地服务。' }}</p><button class="secondaryButton" @click="openSettings('comicDefaults')">更换 / 配置模型</button></details></section>
                   <details class="surface writingDetails" :open="scriptSourceOpen" @toggle="scriptSourceOpen = ($event.target as HTMLDetailsElement).open"><summary>{{ isOriginalEpisode ? '灵感与参考' : '来源素材' }} · {{ episode.topic.verified ? '已确认' : '待核对' }}</summary>
                   <span class="sourceTag">{{ episode.topic.source }}</span>
@@ -266,7 +267,8 @@
             </section>
 
             <section v-else-if="stage === 2 && episode">
-              <header class="productionHeader"><div><h2>把故事安排成画面</h2><p>{{ episode.panels.length }} 格 · 点击左侧画格，编辑场景、出场人物和台词。</p></div><div class="panelActions"><button class="textButton" @click="stage = 1">← 返回脚本</button><button class="secondaryButton" @click="stage = 3">选角色与画风 →</button><button class="primaryButton" :disabled="!episode.panels.length" @click="stage = 4">进入漫画制作 →</button></div></header>
+              <header class="productionHeader"><div><h2>把故事安排成画面</h2><p>{{ episode.panels.length }} 格 · 点击左侧画格，编辑场景、出场人物和台词。</p></div><div class="panelActions"><button class="textButton" @click="stage = 3">← 返回角色绑定</button><button class="primaryButton" :disabled="!episode.panels.length" @click="stage = 4">进入漫画制作 →</button></div></header>
+              <div class="boardGenerate"><p>{{ episode.panels.length ? '修改脚本或角色绑定后，可重新生成分镜；已有图片与版本先备份。' : '角色绑定完成后，按最终人物姓名和性格生成画面与对白。' }}</p><button class="primaryButton" :disabled="!!unboundScriptRoles.length" @click="run('按绑定角色生成分镜，请稍候…', () => generateStory('storyboard'))">{{ episode.panels.length ? '重新生成分镜' : '生成分镜' }}</button></div>
               <details class="surface boardStory"><summary>对照故事正文 · {{ episode.title }}</summary><p>{{ episode.story || '还没有正文，可返回脚本编写。' }}</p></details>
               <div class="boardWorkspace">
                 <nav class="boardRail" aria-label="分镜导航"><div class="boardRailTitle"><strong>阅读顺序</strong><button class="textButton" @click="addStoryboardPanel">＋ 新增</button></div><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: storyboardPanelId === panel.id }" :aria-pressed="storyboardPanelId === panel.id" @click="storyboardPanelId = panel.id"><span class="boardNumber">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>第 {{ index + 1 }} 格</strong><small>{{ panel.action.slice(0, 45) || '还没有画面描述' }}</small></span></button></nav>
@@ -314,13 +316,24 @@
             </section>
 
             <section v-else-if="stage === 3" class="assetsStage">
-              <header class="productionHeader"><div><h2>为故事选好角色与画风</h2><p>公共库跨作品复用，本篇选用独立保存。</p></div><button class="primaryButton" :disabled="!episode" @click="stage = 4">进入漫画制作 →</button></header>
-              <div class="artNavigation" role="tablist" aria-label="角色与美术工作区"><button role="tab" :aria-selected="artTab === 'characters'" :class="{ selected: artTab === 'characters' }" @click="artTab = 'characters'">角色 · {{ episode?.castSnapshot.length || 0 }} 位已选</button><button role="tab" :aria-selected="artTab === 'styles'" :class="{ selected: artTab === 'styles' }" @click="artTab = 'styles'">画风 · {{ episode?.styleSnapshot?.name || activeStyle?.name || '未选择' }}</button></div>
-              <details v-if="episode && artTab === 'characters'" class="artBindingDetails"><summary>剧情人物绑定 · 选好角色后在这里匹配姓名与出场</summary>
-              <section v-if="episode && storySpeakers.length" class="surface castingOverview"><h3>剧本人物 → 固定形象</h3><button class="secondaryButton" @click="run('统一剧情人物名', synchronizeCastNames)">将已绑定姓名同步到剧情与对白</button><p>选择角色只加入本篇名单。在这里指定谁来出演，关联外形、性格和台词；之后仍可逐格微调。</p><div v-for="name in storySpeakers" :key="name"><label :for="`castRole${name}`">{{ name }}</label><select :id="`castRole${name}`" :value="castForSpeaker(name)" @change="run('调整剧本人物绑定', () => assignStoryRole(name, ($event.target as HTMLSelectElement).value))"><option value="">尚未绑定</option><option v-for="person in episode.castSnapshot" :key="person.id" :value="person.id">{{ person.name }} · {{ person.personality.slice(0, 25) || '未设性格' }}</option></select><details v-if="castForSpeaker(name)"><summary>旧名与简称 · 需要时补充</summary><label>剧情中对这个人的其他称呼<input :value="episode.castSnapshot.find(person => person.id === castForSpeaker(name))?.aliases" @input="setStoryAliases(name, ($event.target as HTMLInputElement).value)" placeholder="例如：蓝原柚子，柚子" maxlength="500" /></label><p class="helperText">用逗号隔开；填写后点击上方同步姓名。不会猜测可能属于其他人物的简称。</p></details></div></section>
-              <details v-if="episode" class="surface castingOverview"><summary>角色绑定 · 查看与调整每格出场人物</summary><p>选入公共库角色只加入本篇演员名单，不会自动替换已有分镜人物。下方可直接调整每格；对白说话者在分镜或字幕页调整。</p><div v-for="(panel, index) in episode.panels" :key="panel.id"><strong>第 {{ index + 1 }} 格</strong><span>{{ episode.castSnapshot.filter((person) => panel.characters.includes(person.id)).map((person) => person.name).join('、') || '未分配角色' }}</span><label v-for="person in episode.castSnapshot" :key="person.id"><input v-model="panel.characters" type="checkbox" :value="person.id" />{{ person.name }}</label><button class="textButton" @click="stage = 2">调整台词与表演</button></div></details>
-              </details>
-              <artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
+              <header class="productionHeader"><div><h2>为故事选好角色与画风</h2><p>公共库跨作品复用，本篇选用独立保存。</p></div><div class="panelActions"><button class="textButton" @click="stage = 1">← 返回脚本</button><button class="primaryButton" :disabled="!episode || !!unboundScriptRoles.length" @click="stage = 2">设计分镜 →</button></div></header>
+              <div class="artNavigation" role="tablist" aria-label="角色与美术工作区"><button role="tab" :aria-selected="artTab === 'characters'" :class="{ selected: artTab === 'characters' }" @click="artTab = 'characters'">角色绑定</button><button role="tab" :aria-selected="artTab === 'styles'" :class="{ selected: artTab === 'styles' }" @click="artTab = 'styles'">画风 · {{ episode?.styleSnapshot?.name || activeStyle?.name || '未选择' }}</button></div>
+              <section v-if="episode && artTab === 'characters' && storySpeakers.length" class="surface roleCasting">
+                <header><div><h3>谁来出演？</h3><p>为每位剧本人物选择一个形象。选中即绑定，姓名自动同步到剧情和台词。</p></div><strong role="status">已绑定 {{ storySpeakers.filter(name => castForSpeaker(name)).length }} / {{ storySpeakers.length }}</strong></header>
+                <article v-for="(name, roleIndex) in storySpeakers" :key="name" class="roleCastingRow">
+                  <div class="scriptPerson"><small>剧本人物 {{ String(roleIndex + 1).padStart(2, '0') }}</small><h4>{{ name }}</h4><p>{{ episode.scriptRoles.find(role => role.name === name)?.personality || episode.scriptRoles.find(role => role.name === name)?.description || '选择适合这个人物的形象与性格' }}</p></div>
+                  <span class="castingArrow" aria-hidden="true">→</span>
+                  <div class="castPerson"><img v-if="boundPerson(name)?.image && imageUrls[boundPerson(name)!.image]" :src="imageUrls[boundPerson(name)!.image]" :alt="boundPerson(name)?.name" /><span v-else class="castPlaceholder">{{ castForSpeaker(name) ? '暂无预览' : '待选择' }}</span><div><strong>{{ boundPerson(name)?.name || '尚未绑定形象' }}</strong><p>{{ boundPerson(name)?.personality || (castForSpeaker(name) ? '可展开微调本篇性格' : '从公共角色库选择，也可以新建') }}</p><div class="panelActions"><button class="secondaryButton" @click="bindingTarget = name">{{ castForSpeaker(name) ? '更换形象' : '选择形象' }}</button><button v-if="castForSpeaker(name)" class="textButton" :aria-label="`取消${name}的绑定`" @click="run('取消角色绑定', () => assignStoryRole(name, ''))">取消绑定</button></div></div></div>
+                  <details v-if="boundPerson(name)" class="roleTweaks"><summary>微调本篇性格与称呼</summary><label>性格与习惯<textarea :value="boundPerson(name)?.personality" maxlength="1500" rows="2" @change="run('保存本篇性格', () => updateBoundPerson(name, 'personality', ($event.target as HTMLTextAreaElement).value))" /></label><label>其他称呼<input :value="boundPerson(name)?.aliases" maxlength="500" placeholder="用逗号分隔" @change="run('同步人物称呼', () => updateBoundPerson(name, 'aliases', ($event.target as HTMLInputElement).value))" /></label><p class="helperText">只修改本篇设定。性格用于后续生成；已有图片不会自动重绘。</p></details>
+                </article>
+                <p class="helperText">{{ episode.panels.length ? '更换形象会同步已有分镜的人物与姓名；已有图片需重新绘制。逐格出场、动作和台词请在分镜设计调整。' : '绑定完成后，进入分镜设计，让角色的性格参与动作和对白生成。' }}</p>
+              </section>
+              <p v-if="artTab === 'characters' && !storySpeakers.length" class="helperText">先在“选题与脚本”生成剧本人物清单，再回来绑定形象；也可以先准备公共角色。</p>
+              <el-dialog :model-value="!!bindingTarget" :title="`为「${bindingTarget}」选择形象`" width="min(1000px, 94vw)" @update:model-value="value => { if (!value) bindingTarget = ''; }">
+                <artLibrary v-if="bindingTarget" :selectionLabel="`绑定给${bindingTarget}`" hideSelectionTray :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyBoundLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
+              </el-dialog>
+              <details v-if="artTab === 'characters' && storySpeakers.length" class="surface"><summary>管理公共角色库 · 新建、编辑与复用</summary><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></details>
+              <template v-else><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></template>
               <p v-if="episode?.styleSnapshot" class="helperText">本篇画风：{{ episode.styleSnapshot.name }}。换画风用于后续生成，已有图片需重新绘制。{{ episode.panels.some((panel) => panel.imagePromptOverride) ? '注意：部分分格使用自定义提示词，会覆盖自动整理的画风描述，请在分格出图中检查。' : '' }}</p>
               <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">{{ textServiceLabel }} · 须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
             </section>
@@ -509,18 +522,18 @@
               <icon-file-description :size="32" />
               <h2>先为本期选一个话题</h2>
               <p>从资讯候选或你提供的来源创建作品，再继续制作。</p>
-              <button class="primaryButton" @click="stage = 0">前往热点与来源</button>
+              <button class="primaryButton" @click="stage = 0">前往找剧本</button>
             </section>
           </fieldset>
 
           <footer v-if="![0, 1, 2, 3, 4, 5].includes(stage)" class="stageFooter">
-            <button class="textButton" :disabled="stage === 0 || !!busy" @click="stage = stage === 6 || stage === 5 ? 4 : stage - 1">
+            <button class="textButton" :disabled="stage === 0 || !!busy" @click="stage = adjacentStage(-1)">
               <icon-arrow-left :size="16" />
               上一步
             </button>
-            <span>{{ stage >= 5 ? stage : stage + 1 }} / {{ stages.length - 1 }}</span>
-            <button class="primaryButton" :disabled="stage === stages.length - 1 || !!busy || !episode" @click="stage = stage === 4 || stage === 5 ? 6 : stage + 1">
-              {{ !episode ? (ideaMode === 'ownStory' ? '先保存自己的剧情' : '从剧情、原创灵感或热点开始') : stage === stages.length - 1 ? '已到最后一步' : `继续：${stages[stage === 4 || stage === 5 ? 6 : stage + 1]!.title}` }}
+            <span>{{ workflowOrder.indexOf(stage === 5 ? 4 : stage) + 1 }} / {{ stages.length - 1 }}</span>
+            <button class="primaryButton" :disabled="stage === stages.length - 1 || !!busy || !episode" @click="stage = adjacentStage(1)">
+              {{ !episode ? (ideaMode === 'ownStory' ? '先保存自己的剧情' : '从剧情、原创灵感或热点开始') : stage === stages.length - 1 ? '已到最后一步' : `继续：${stages[adjacentStage(1)]!.title}` }}
               <icon-arrow-right :size="16" />
             </button>
           </footer>
@@ -563,7 +576,7 @@
         <section class="connectionCard">
           <div class="connectionTitle"><h3>小红书</h3><span class="connectionStatus">{{ xhsConnected ? '本人账号已连接' : loginImage ? '等待手机确认' : loginBusy ? '正在检查…' : xhsAvailable ? '服务就绪 · 待扫码' : '尚未连接' }}</span></div>
           <ol v-if="!loginImage && !xhsConnected"><li>手机上登录你自己的小红书 App；没有账号请先在 App 内注册。</li><li>点击下方连接，软件会启动本机搜索服务并显示二维码。</li><li>用 App 扫码并确认；页面自动更新后即可按关键词找高赞笔记。</li></ol>
-          <button v-if="!xhsConnected && !loginImage" class="connectionButton" :disabled="loginBusy" @click="connectXhs">{{ loginBusy ? '正在准备…' : '连接小红书' }}</button>
+          <button v-if="!loginImage" class="connectionButton" :disabled="loginBusy" @click="connectXhs">{{ loginBusy ? '正在准备…' : xhsConnected ? '重新连接小红书' : '连接小红书' }}</button>
           <button v-if="xhsConnected" class="connectionButton" @click="source = 'xhsLocal'; stage = 0; settingsVisible = false; workspaceMode = 'studio'">开始搜索小红书</button>
           <button class="connectionSecondary" :disabled="loginBusy" @click="checkXhsLogin">检查连接</button>
           <p role="status">{{ loginMessage }}</p>
@@ -836,7 +849,7 @@ function requestStory() {
     openSettings("comicDefaults");
     return;
   }
-  void run("生成脚本与分镜，请稍候…", generateStory);
+  void run("生成脚本与人物清单，请稍候…", () => generateStory("script"));
 }
 function useTopicAsInspiration() {
   void run("将热词用作原创灵感", async () => {
@@ -853,7 +866,7 @@ function useTopicAsInspiration() {
 const studioContent = ref<HTMLElement>();
 watch([stage, workspaceMode, analysisView, archiveView, ideaMode], () => { window.scrollTo({ top: 0, behavior: "instant" }); studioContent.value?.scrollTo({ top: 0, behavior: "instant" }); }, { flush: "post" });
 const stages = [
-  { title: "热点与来源", icon: IconSearch, eyebrow: "DISCOVER", heading: "好故事，从一个好选题开始。", description: "收集资讯、保留来源，选择值得用漫画表达的话题。" },
+  { title: "找剧本", icon: IconSearch, eyebrow: "DISCOVER", heading: "好故事，从一个好选题开始。", description: "收集资讯、保留来源，选择值得用漫画表达的话题。" },
   { title: "选题与脚本", icon: IconPencil, eyebrow: "WRITE", heading: "让话题，成为一个故事。", description: "核对事实素材，确定表达角度，完成故事与对白。" },
   { title: "分镜设计", icon: IconLayoutBoard, eyebrow: "STORYBOARD", heading: "把故事，一格一格展开。", description: "编排镜头、动作与对白，为每个画面做好准备。" },
   { title: "角色与美术", icon: IconUserSquareRounded, eyebrow: "ART DIRECTION", heading: "每个故事，都有自己的样子。", description: "先选本篇角色与画风，再用图片或一句话创建新资源。" },
@@ -862,14 +875,17 @@ const stages = [
   { title: "整体预览", icon: IconChecklist, eyebrow: "REVIEW", heading: "看看完整效果，满意就导出。", description: "预览整体排版，随时返回微调，不需要逐格审批。" },
   { title: "导出发布", icon: IconPackageExport, eyebrow: "PUBLISH", heading: "把完成的故事，交给读者。", description: "打包成品、文案与来源，前往平台发布并记录作品。" },
 ];
+const workflowOrder = [0, 1, 3, 2, 4, 6, 7];
+const workflowStages = computed(() => workflowOrder.map(index => ({ index, item: stages[index]! })));
+function adjacentStage(direction: number) { return workflowOrder[Math.max(0, Math.min(workflowOrder.length - 1, workflowOrder.indexOf(stage.value === 5 ? 4 : stage.value) + direction))]!; }
 const comicProjects = computed(() => workspace.projectList.filter((item) => isComicDirectory(item.directory) || item.directory === directory.value));
 const newProjectVisible = ref(false);
 const newProjectTitle = ref("");
 const topicVisible = ref(false);
 const topicDraft = reactive({ title: "", url: "", summary: "", original: false });
 const settingsVisible = ref(false);
-const settingsPanel = ref("comicOverview");
-function openSettings(panel = "comicOverview") { settingsPanel.value = panel; settingsVisible.value = true; }
+const settingsPanel = ref("comicDefaults");
+function openSettings(panel = "comicDefaults") { settingsPanel.value = panel; settingsVisible.value = true; }
 watch(connectionsVisible, (visible) => { if (visible) openSettings("comicPlatforms"); });
 watch([settingsVisible, settingsPanel], ([visible, panel]) => { connectionsVisible.value = visible && panel === "comicPlatforms"; });
 let collectionTimer: ReturnType<typeof setInterval> | undefined;
@@ -931,7 +947,7 @@ function stageComplete(index: number) {
     true,
     Boolean(current.story),
     current.panels.length > 0,
-    Boolean(current.styleSnapshot),
+    Boolean(current.styleSnapshot) && current.scriptRoles.every(role => current.castSnapshot.some(person => person.id === current.roleBindings[role.name])),
     productionReady(current),
     previewUrls.value.length > 0,
     previewUrls.value.length > 0,
@@ -1014,11 +1030,13 @@ function activateUpload(event: KeyboardEvent) {
 }
 const textServiceLabel = computed(() => textMode.value === "codex" ? `Codex CLI · ${codexModel.value || "默认模型"}` : textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value)?.label || textModel.value || "尚未配置文本模型");
 const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : `图片分析：${textServiceLabel.value}`);
+const unboundScriptRoles = computed(() => episode.value?.scriptRoles.filter(role => !episode.value?.castSnapshot.some(person => person.id === episode.value?.roleBindings[role.name])) || []);
 const storySpeakers = computed(() => {
   const current = episode.value;
   if (!current) return [];
+  if (current.scriptRoles.length) return current.scriptRoles.map(role => role.name);
   const names = current.panels.flatMap(panel => panel.dialogue.split("\n").map(line => line.match(/^([^：:]{1,30})[：:]/)?.[1]?.trim()).filter((name): name is string => !!name));
-  return [...new Set([...Object.keys(current.roleBindings), ...names])].filter(name => !Object.entries(current.roleBindings).some(([original, id]) => original !== name && current.castSnapshot.find(person => person.id === id)?.name === name));
+  return [...new Set([...current.scriptRoles.map(role => role.name), ...Object.keys(current.roleBindings), ...names])].filter(name => !Object.entries(current.roleBindings).some(([original, id]) => original !== name && current.castSnapshot.find(person => person.id === id)?.name === name));
 });
 function castForSpeaker(name: string) {
   if (episode.value && Object.hasOwn(episode.value.roleBindings, name)) return episode.value.roleBindings[name] || "";
@@ -1047,11 +1065,24 @@ async function assignStoryRole(name: string, id: string) {
   bindStoryName(current, name, id);
   await save();
 }
-function setStoryAliases(name: string, value: string) { const person = episode.value?.castSnapshot.find(item => item.id === castForSpeaker(name)); if (person) person.aliases = value; }
-async function synchronizeCastNames() {
-  if (!episode.value) return;
-  for (const [name, id] of Object.entries(episode.value.roleBindings)) if (id) bindStoryName(episode.value, name, id);
+const bindingTarget = ref("");
+watch(() => episode.value?.id, () => { bindingTarget.value = ""; });
+function boundPerson(name: string) { return episode.value?.castSnapshot.find(person => person.id === castForSpeaker(name)); }
+async function updateBoundPerson(name: string, field: "personality" | "aliases", value: string) {
+  const person = boundPerson(name);
+  if (!person || !episode.value) return;
+  person[field] = value;
+  if (field === "aliases") bindStoryName(episode.value, name, person.id);
   await save();
+}
+async function applyBoundLibraryItem(kind: "characters" | "styles", source: Character | ArtStyle, libraryDirectory: string) {
+  const target = bindingTarget.value;
+  if (!target || !episode.value) return;
+  const otherRole = Object.entries(episode.value.roleBindings).find(([name, id]) => name !== target && id === source.id)?.[0];
+  if (otherRole) throw new Error(`此形象已由「${otherRole}」出演，请选择其他角色，或先取消原绑定`);
+  await applyLibraryItem(kind, source, libraryDirectory);
+  await assignStoryRole(target, source.id);
+  bindingTarget.value = "";
 }
 
 function syncSpeechActor(panel: Panel, index: number) {
@@ -1068,6 +1099,7 @@ async function removeLibraryItem(kind: "characters" | "styles", id: string) {
   } else if (episode.value) {
     const affected = episode.value.panels.filter((panel) => panel.characters.includes(id) || panel.speech.some((line) => line.speakerId === id));
     if (affected.length && !await ElMessageBox.confirm(`此角色参与了 ${affected.length} 格。取消后保留文字和图片，清除人物绑定，可在分镜中重新指定。`, "取消本篇角色", { confirmButtonText: "取消选用", cancelButtonText: "保留角色" }).then(() => true, () => false)) return;
+    for (const [name, bound] of Object.entries(episode.value.roleBindings)) if (bound === id) await assignStoryRole(name, "");
     episode.value.castSnapshot = episode.value.castSnapshot.filter((person) => person.id !== id);
     for (const name of Object.keys(episode.value.roleBindings)) if (episode.value.roleBindings[name] === id) episode.value.roleBindings[name] = "";
     for (const panel of episode.value.panels) {
@@ -1140,7 +1172,10 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-.castingOverview { margin-top:16px; summary { cursor:pointer; font-weight:600; } > div { display:flex; gap:12px; flex-wrap:wrap; align-items:center; border-top:1px solid var(--studioLine); padding:12px 0; } label { display:flex; gap:4px; align-items:center; } }
+.taskWaiting { display: flex; gap: 16px; align-items: center; padding: 16px; margin-bottom: 16px; border: 1px solid #b9cab9; background: #edf4ec; border-radius: 12px; position: sticky; top: 0; z-index: 5; p { margin: 6px 0 0; } progress { width: 100px; flex-shrink: 0; } }
+.boardGenerate { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
+
+
 .spaceHeading { display: flex; justify-content: space-between; align-items: center; .spaceManage { border: 0; background: transparent; color: #e7eee8; font-size: 24px; padding: 0 8px; cursor: pointer; } }
 .creationSummary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; color: var(--studioMuted); }
 .postToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; select { flex: 1 1 140px; min-width: 0; } }
@@ -2526,13 +2561,13 @@ onMounted(() => {
 .productionSettings { margin: 12px 0; summary { cursor: pointer; font-size: 12px; color: var(--studioMuted); padding: 8px 0; } .toolbar { padding: 12px; background: var(--studioCard); border: 1px solid var(--studioLine); border-radius: 10px; } }
 .productionSteps { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 14px 0; font-size: 13px; span { font-size: 12px; color: var(--studioMuted); } }
 .comicStudio .panelWorkspace { display: grid; grid-template-columns: 112px minmax(0, 1fr); border: 1px solid var(--studioLine); border-radius: 14px; overflow: hidden; background: var(--studioCard);
-  .drawingTabs { grid-column: auto; display: flex; flex-direction: column; margin: 0; padding: 10px; gap: 10px; background: #f0f3ed; button { min-width: 0; width: 100%; padding: 6px; font-size: 11px; } img { width: 100%; height: 94px; } }
+  .drawingTabs { min-height: 0; min-width: 0; overscroll-behavior: contain; grid-column: auto; display: flex; flex-direction: column; margin: 0; padding: 10px; gap: 10px; background: #f0f3ed; button { flex-shrink: 0; min-width: 0; width: 100%; padding: 6px; font-size: 11px; } img { width: 100%; height: 94px; } }
   .singlePanelGrid { margin: 0; display: block; .imageCard { display: grid; grid-template-columns: minmax(220px, 1fr) 290px; max-width: none; border: 0; border-radius: 0; } .panelArt { aspect-ratio: auto; min-height: 440px; max-height: none; padding: 18px; background: #e9ece6; img { max-height: 650px; object-fit: contain; height: auto; } } .imageCardBody { min-width: 0; padding: 18px; h3 { font-size: 15px; margin: 0 0 16px; } textarea { width: 100%; } summary { padding: 10px 0; cursor: pointer; font-size: 12px; } } }
 }
 .comicStudio .layoutStage { gap: 0; .layoutControls { margin-bottom: 16px; padding: 12px 16px; summary { cursor: pointer; font-size: 13px; } } .layoutWorkspace { grid-template-columns: 112px minmax(0, 1fr); gap: 0; border: 1px solid var(--studioLine); border-radius: 12px; overflow: hidden; background: var(--studioCard); } .letteringTabs { grid-column: auto; display: flex; flex-direction: column; background: #f0f3ed; padding: 10px; margin: 0; button { font-size: 12px; } } .letteringRows .surface { border: 0; padding: 16px; h3 { margin: 0; font-size: 14px; } > details { margin: 10px 0; } } .pagePreviewColumn { grid-column: 2; position: static; padding: 16px; summary { cursor: pointer; } } }
 @media (max-width: 1100px) { .comicStudio .panelWorkspace .singlePanelGrid .imageCard { grid-template-columns: minmax(180px, 1fr) 250px; } }
 @media (max-width: 760px) { .comicStudio .panelWorkspace { grid-template-columns: 1fr; .drawingTabs { flex-direction: row; overflow-x: auto; button { min-width: 80px; } img { height: 60px; } } .singlePanelGrid .imageCard { grid-template-columns: 1fr; } } .comicStudio .layoutStage { .layoutWorkspace { grid-template-columns: 1fr; } .letteringTabs { flex-direction: row; overflow-x: auto; } .pagePreviewColumn { grid-column: 1; } } .productionModes button { padding: 8px 12px; } }
-@media (min-width: 761px) { .comicStudio .panelWorkspace { height: max(460px, calc(100vh - 375px)); .drawingTabs, .imageCardBody { overflow-y: auto; } .singlePanelGrid { min-height: 0; .imageCard { height: 100%; min-height: 0; } .panelArt { min-height: 0; overflow: auto; img { max-height: 100%; } } } } }
+@media (min-width: 761px) { .comicStudio .panelWorkspace { height: max(460px, calc(100vh - 375px)); .drawingTabs, .imageCardBody { min-height: 0; overflow-y: auto; overscroll-behavior: contain; } .singlePanelGrid { min-height: 0; .imageCard { height: 100%; min-height: 0; } .panelArt { min-height: 0; overflow: auto; img { max-height: 100%; } } } } }
 
 .productionHeader { margin-bottom: 12px; }
 .productionNavigation { display: inline-block; vertical-align: top; margin-right: 20px; }
@@ -2569,4 +2604,12 @@ onMounted(() => {
 .frameNavigator { display: flex; align-items: center; gap: 8px; h3 { flex: 1; margin: 0 !important; } }
 .batchControl { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: #edf3e7; border-radius: 10px; margin: 12px 0; font-size: 13px; }
 .productionEmpty { text-align: center; padding: 40px; }
+
+.roleCasting { header { display:flex; justify-content:space-between; gap:16px; align-items:center; } h3, h4 { margin:0; } p { color:var(--studioMuted); font-size:13px; line-height:1.6; } header > strong { white-space:nowrap; font-size:13px; } }
+.roleCastingRow { display:grid; grid-template-columns:minmax(0, 1fr) 24px minmax(0, 1.3fr); gap:16px; align-items:center; padding:20px 0; border-top:1px solid var(--studioLine); }
+.scriptPerson { min-width:0; small { color:var(--studioMuted); } h4 { margin-top:6px; } p { margin-bottom:0; overflow-wrap:anywhere; } }
+.castingArrow { color:var(--studioMuted); }
+.castPerson { display:flex; gap:14px; align-items:center; min-width:0; > div { min-width:0; } img, .castPlaceholder { width:76px; height:96px; flex-shrink:0; border-radius:8px; object-fit:contain; background:var(--studioPaper); } .castPlaceholder { display:grid; place-items:center; color:var(--studioMuted); font-size:12px; } p { margin:6px 0; overflow-wrap:anywhere; } }
+.roleTweaks { grid-column:3; summary { cursor:pointer; color:var(--studioMuted); font-size:12px; } label { display:grid; gap:6px; margin-top:12px; } }
+@media(max-width:760px) { .roleCasting header { align-items:flex-start; flex-direction:column; } .roleCastingRow { grid-template-columns:minmax(0,1fr); gap:12px; } .castingArrow { display:none; } .roleTweaks { grid-column:1; } }
 </style>

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { access } from "@toonflow/file";
+import { access, chmod } from "@toonflow/file";
 import u from "@/utils";
 import { success } from "@/lib/responseFormat";
 
@@ -21,15 +21,16 @@ async function serviceReady() {
 async function startService() {
   if (await serviceReady()) return;
   const directory = resolve(dirname(u.conf.path), "localServices", "xhs");
-  const binary = resolve(directory, "xhsServer");
+  const binary = resolve(directory, process.platform === "win32" ? "xhsServer.exe" : "xhsServer");
   try {
     await access(binary, 1);
   } catch {
     throw Object.assign(new Error("本机尚未安装小红书搜索服务，请按使用指南安装后重试；抖音公开热榜可直接使用。"), { status: 503 });
   }
+  if (process.platform !== "win32") await chmod(directory, 0o700);
   // Only launch the locally installed helper, with a fixed loopback address and no shell or user-supplied arguments.
   await new Promise<void>((done, reject) => {
-    const child = spawn(binary, ["-port", "127.0.0.1:18060"], { cwd: directory, shell: false, detached: true, stdio: "ignore" });
+    const child = spawn(binary, ["-port", "127.0.0.1:18060"], { cwd: directory, env: { ...process.env, COOKIES_PATH: resolve(directory, "cookies.json") }, shell: false, detached: true, stdio: "ignore" });
     child.once("error", () => reject(Object.assign(new Error("小红书搜索服务启动失败，请检查本机安装"), { status: 503 })));
     child.once("spawn", () => { child.unref(); done(); });
   });

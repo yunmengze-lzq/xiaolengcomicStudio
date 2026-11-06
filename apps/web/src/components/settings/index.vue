@@ -1,6 +1,6 @@
 <template>
   <el-dialog v-model="visible" title="设置中心" width="min(1080px, calc(100vw - 32px))" alignCenter appendToBody>
-    <div class="settings">
+    <div class="settings" :class="{ comicSettings: props.comicStudio }">
       <aside class="sidebar" aria-label="设置分类">
         <template v-for="item in visiblePanels" :key="item.id">
           <h3 v-if="item.groupLabel" class="settingsGroupLabel">{{ item.groupLabel }}</h3>
@@ -8,7 +8,7 @@
             class="settingsItem"
             type="button"
             :aria-label="item.id === 'about' && hasDesktopUpdate ? `${item.label}，有新版本可用` : item.label"
-            :aria-pressed="activePanel.id === item.id"
+            :aria-pressed="settingsSection(activePanel.id) === item.id"
             @click="panel = item.id">
             <el-badge class="panelIcon" isDot :hidden="item.id !== 'about' || !hasDesktopUpdate">
               <component :is="item.icon" :size="18" aria-hidden="true" />
@@ -18,9 +18,10 @@
         </template>
       </aside>
       <section class="content" :aria-label="activePanel.label" tabindex="0">
+        <nav v-if="props.comicStudio && sectionPanels.length > 1" class="settingsSubnav" aria-label="当前设置分组"><button v-for="item in sectionPanels" :key="item.id" :aria-pressed="activePanel.id === item.id" @click="panel = item.id">{{ item.label }}</button></nav>
         <h2 class="panelTitle">{{ activePanel.label }}</h2>
         <div class="panelContent">
-          <div v-if="props.comicStudio && ['languageModel', 'mediaModel'].includes(activePanel.id)" class="modelPurpose"><p>{{ activePanel.id === 'languageModel' ? '管理编剧、选梗和分析使用的文本服务。可添加云端API，也可配置本机OpenAI兼容服务。' : '管理角色、画风和分格出图服务。支持已有图片供应商，以及本机ComfyUI工作流。' }}</p><button @click="panel = 'comicDefaults'">查看漫画默认模型分配</button><button @click="panel = 'comicLocal'">检测本地模型服务</button></div>
+          <div v-if="props.comicStudio && ['languageModel', 'mediaModel'].includes(activePanel.id)" class="modelPurpose"><p>{{ activePanel.id === 'languageModel' ? '管理编剧、选梗和分析使用的文本服务。可添加云端API，也可配置本机OpenAI兼容服务。' : '管理角色、画风和分格出图服务。支持已有图片供应商，以及本机ComfyUI工作流。' }}</p></div>
           <div v-if="activePanel.id.startsWith('comic')" :key="activePanel.id">
             <slot :name="activePanel.id" />
           </div>
@@ -97,18 +98,30 @@ const comicPanels = [
   { id: "comicCollection", label: "自动采集", icon: IconDevices, component: null, groupLabel: undefined },
   { id: "comicLocal", label: "本地模型服务", icon: IconCode, component: null, groupLabel: undefined },
 ];
-const visiblePanels = computed(() => {
+const availablePanels = computed(() => {
   if (!props.comicStudio) return settingsPanels;
   const original = (id: string, groupLabel?: string) => ({ ...settingsPanels.find((item) => item.id === id)!, groupLabel });
   const comic = (id: string, groupLabel?: string) => ({ ...comicPanels.find((item) => item.id === id)!, groupLabel });
   return [comic("comicOverview", "开始使用"), original("languageModel", "模型"), { ...original("mediaModel"), label: "生图模型" }, { ...comic("comicDefaults"), label: "默认任务" }, comic("comicPlatforms", "内容来源"), comic("comicCollection"), comic("comicLocal", "本地运行"), original("ui", "外观") ];
 });
 const panel = defineModel<string>("panel", { default: "ui" });
-const activePanel = computed(() => visiblePanels.value.find((item) => item.id === panel.value) || visiblePanels.value[0]!);
+function settingsSection(id: string) {
+  if (["comicOverview", "comicDefaults", "languageModel", "mediaModel", "comicLocal"].includes(id)) return "comicDefaults";
+  if (["comicPlatforms", "comicCollection"].includes(id)) return "comicPlatforms";
+  return id;
+}
+const visiblePanels = computed(() => props.comicStudio ? [
+  { ...comicPanels.find(item => item.id === "comicDefaults")!, label: "模型与生成", groupLabel: undefined },
+  { ...comicPanels.find(item => item.id === "comicPlatforms")!, label: "平台与采集", groupLabel: undefined },
+  { ...settingsPanels.find(item => item.id === "ui")!, label: "界面外观", groupLabel: undefined },
+] : availablePanels.value);
+const activePanel = computed(() => availablePanels.value.find((item) => item.id === panel.value) || availablePanels.value[0]!);
+const sectionPanels = computed(() => availablePanels.value.filter(item => settingsSection(item.id) === settingsSection(activePanel.value.id)).sort((a, b) => ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(a.id) - ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(b.id)));
 const visible = defineModel<boolean>({ default: false });
 </script>
 
 <style lang="scss" scoped>
+.settingsSubnav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; button { padding: 8px 12px; border: 1px solid var(--el-border-color); border-radius: 8px; color: var(--el-text-color-primary); background: var(--el-bg-color); cursor: pointer; &[aria-pressed="true"] { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary); } } }
 .modelPurpose { padding: 16px; border: 1px solid var(--el-border-color); border-radius: 10px; margin-bottom: 20px; background: var(--el-fill-color-light); p { margin: 0 0 12px; line-height: 1.7; } button { margin: 0 12px 5px 0; padding: 8px 12px; border: 1px solid var(--el-border-color); background: var(--el-bg-color); color: var(--el-text-color-primary); border-radius: 6px; cursor: pointer; font: inherit; } }
 
 .settings {
@@ -221,6 +234,12 @@ const visible = defineModel<boolean>({ default: false });
     .content {
       padding: 0 8px 0 16px;
     }
+  }
+}
+@media (max-width: 700px) {
+  .settings.comicSettings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px;
+    .sidebar { display: flex; gap: 4px; .settingsItem { flex: 1; gap: 5px; padding: 10px 4px; font-size: 12px; span { display: inline; } } }
+    .content { padding: 0 4px; min-height: 0; }
   }
 }
 </style>

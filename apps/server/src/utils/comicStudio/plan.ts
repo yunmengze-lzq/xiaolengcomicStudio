@@ -10,7 +10,7 @@ import { getConfiguredModel, streamAi } from "@/utils/ai";
 export const planSchema = z.strictObject({
   title: z.string().min(1).max(100),
   story: z.string().min(1).max(12000),
-  newCharacters: z.array(z.strictObject({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500), personality: z.string().min(1).max(1500), motivation: z.string().min(1).max(1000), speechStyle: z.string().min(1).max(1000) })).max(4).default([]),
+  newCharacters: z.array(z.strictObject({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500), personality: z.string().min(1).max(1500), motivation: z.string().min(1).max(1000), speechStyle: z.string().min(1).max(1000) })).max(10).default([]),
   panels: z
     .array(
       z.strictObject({

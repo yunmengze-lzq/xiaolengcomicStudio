@@ -16,7 +16,7 @@ type Model = { providerId: string; modelId: string; label: string; type?: string
 const planSchema = z.object({
   title: z.string().min(1).max(100),
   story: z.string().min(1).max(12000),
-  newCharacters: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default("") })).max(4).default([]),
+  newCharacters: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), name: z.string().min(1).max(30), description: z.string().min(1).max(1500), personality: z.string().max(1500).default(""), motivation: z.string().max(1000).default(""), speechStyle: z.string().max(1000).default("") })).max(10).default([]),
   panels: z
     .array(
       z.object({
@@ -28,7 +28,7 @@ const planSchema = z.object({
         characters: z.array(z.string()).max(10),
       }),
     )
-    .min(2)
+    .min(0)
     .max(12),
 });
 
@@ -285,13 +285,14 @@ export default function useStudio() {
     const selected = [...new Set(platforms)].filter((item) => ["xhsLocal", "douyin", "bilibili", "tieba", "douban"].includes(item));
     if (!selected.length) throw new Error("请至少选择一个平台");
     researchStatus.value = "正在按同一关键词检索所选平台…";
-    const results = await Promise.allSettled(selected.map(async (platform) => { if (["douban", "tieba"].includes(platform)) { try { return await axios.get("/api/comicStudio/forumTopics", { params: { source: platform, keyword }, headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }); } catch (cause) { try { return await axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers: { "x-toonflow-workspace": "1" }, timeout: 45000 }); } catch { throw cause; } } } return platform === "xhsLocal"
+    const results = await Promise.allSettled(selected.map(async (platform) => { if (["douban", "tieba"].includes(platform)) { try { const result = await axios.get("/api/comicStudio/forumTopics", { params: { source: platform, keyword }, headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }); if (result.data.data.items?.length) return result; } catch { /* Try the user's platform browser when the public source is unavailable. */ } return axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers: { "x-toonflow-workspace": "1" }, timeout: 45000 }); } return platform === "xhsLocal"
       ? axios.get("/api/comicStudio/topics", { params: { source: "xhsLocal", keyword }, headers: { "x-toonflow-workspace": "1" }, timeout: 100000 })
       : axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers: { "x-toonflow-workspace": "1" }, timeout: 45000 }); }));
     if (directory.value !== targetDirectory) throw new Error("创作空间已切换，本次素材没有写入其他空间");
     const materials: Topic[] = [];
     const statuses = results.map((result, index) => {
       const platform = { xhsLocal: "小红书", douyin: "抖音", bilibili: "B站", tieba: "弱智吧", douban: "豆瓣" }[selected[index]!] || selected[index]!;
+      if (result.status === "rejected" && selected[index] === "xhsLocal" && axios.isAxiosError(result.reason) && result.reason.response?.status === 409) { xhsConnected.value = false; loginMessage.value = "登录已失效，请重新连接小红书并扫码。"; }
       if (result.status === "rejected") return { platform, message: axios.isAxiosError(result.reason) ? String(result.reason.response?.data?.message || "连接失败，请重试").slice(0, 500) : "连接失败" };
       const rows = projectSchema.shape.topics.parse((result.value.data.data.items || []).slice(0, 20).map((item: unknown) => ({ ...(item as object), id: crypto.randomUUID(), verified: false })));
       materials.push(...rows);
@@ -485,6 +486,9 @@ export default function useStudio() {
       params: { source: sourceId, keyword: sourceId === "xhsLocal" ? searchKeyword.value : undefined },
       timeout: 100000,
       headers: { "x-toonflow-workspace": "1" },
+    }).catch(error => {
+      if (sourceId === "xhsLocal" && axios.isAxiosError(error) && error.response?.status === 409) { xhsConnected.value = false; loginMessage.value = "登录已失效，请重新连接小红书并扫码。"; }
+      throw error;
     });
     let topics: Topic[];
     if (data.data.items) {
@@ -677,7 +681,7 @@ export default function useStudio() {
   }
 
   async function connectXhs() {
-    if (loginBusy.value || xhsConnected.value) return;
+    if (loginBusy.value) return;
     if (loginImage.value && Date.now() < loginExpiresAt.value) { scheduleLoginCheck(); return; }
     loginBusy.value = true;
     loginMessage.value = "正在准备本机服务和登录二维码…";
@@ -687,8 +691,9 @@ export default function useStudio() {
       const { data } = await axios.get("/api/comicStudio/xhsLogin", { params: { action: "qrcode" }, headers: { "x-toonflow-workspace": "1" }, timeout: 100000 });
       xhsConnected.value = data.data.loggedIn;
       loginImage.value = data.data.image;
-      loginExpiresAt.value = Date.now() + 240000;
-      loginSeconds.value = 240;
+      const qrSeconds = /^\d+(?:\.\d+)?s$/.test(data.data.timeout || "") ? Math.ceil(parseFloat(data.data.timeout)) : 240;
+      loginExpiresAt.value = Date.now() + qrSeconds * 1000;
+      loginSeconds.value = qrSeconds;
       loginMessage.value = xhsConnected.value ? "已连接，可以开始搜索。" : "用本人小红书 App 扫码，并在手机上确认。这里会自动检查结果。";
       function updateCountdown() {
         loginSeconds.value = Math.max(0, Math.ceil((loginExpiresAt.value - Date.now()) / 1000));
@@ -741,13 +746,14 @@ export default function useStudio() {
     return path;
   }
 
-  async function generateStory() {
+  async function generateStory(phase: "script" | "storyboard" = "script") {
     const current = episode.value;
     if (!current) return;
     if (!current.topic.verified) throw new Error("请先核对来源，并在选题页确认事实素材");
-    if (current.panels.length && !window.confirm("重新生成会替换当前脚本和分镜。旧内容将先保存为项目内的历史快照，是否继续？")) return;
+    if (phase === "storyboard" && current.scriptRoles.some(role => !current.castSnapshot.some(person => person.id === current.roleBindings[role.name]))) throw new Error("请先为每位剧本角色绑定本篇人物，再生成分镜");
+    if ((current.panels.length || phase === "script" && current.story.trim()) && !window.confirm(phase === "script" ? "整理脚本与人物清单，已有内容先保存历史快照。已有分镜保留，需之后手动重新生成。是否继续？" : "将按已绑定人物重新生成分镜，旧分镜先保存历史快照。是否继续？")) return;
     await save();
-    if (current.panels.length) await files.value.writeJson(`storyBackup${Date.now()}.json`, clone(current), true);
+    if (current.panels.length || current.story.trim()) await files.value.writeJson(`storyBackup${Date.now()}.json`, clone(current), true);
     const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
     const castContext = JSON.stringify(current.castSnapshot.map((item) => matchingCharacter(item, project.value?.characters || []) || item).map(({ id, name, aliases, description, personality, motivation, speechStyle }) => ({ id, name, aliases, description, personality, motivation, speechStyle })));
     if (castContext.length > 10000) throw new Error("本期角色设定超过编剧输入上限，请减少出场角色或精简设定；尚未调用模型");
@@ -756,6 +762,7 @@ export default function useStudio() {
       {
         directory: directory.value,
         mode: textMode.value,
+        phase,
         topic: JSON.stringify(current.topic),
         storyMode: current.storyMode,
         targetPanels: current.targetPanels,
@@ -776,6 +783,16 @@ export default function useStudio() {
       { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 },
     );
     const plan = planSchema.parse(data.data);
+    if (phase === "script") {
+      if (new Set(plan.newCharacters.map(person => person.name)).size !== plan.newCharacters.length || new Set(plan.newCharacters.map(person => person.id)).size !== plan.newCharacters.length) throw new Error("剧本人物姓名或编号重复，请重试，原稿已保留");
+      current.title = plan.title;
+      current.story = plan.story;
+      current.scriptRoles = plan.newCharacters.map(({ id, name, description, personality }) => ({ id, name, description, personality }));
+      current.roleBindings = Object.fromEntries(current.scriptRoles.map(role => [role.name, current.roleBindings[role.name] || current.castSnapshot.find(person => person.name === role.name)?.id || ""]));
+      if (!current.postText.trim()) current.postText = plan.title;
+      await save(); stage.value = 3; return;
+    }
+    if (plan.panels.length < 2) throw new Error("模型没有返回有效分镜，原稿已保留");
     bindCast(current, project.value!.characters);
     if (new Set(plan.newCharacters.map((item) => item.id)).size !== plan.newCharacters.length) throw new Error("生成角色标识重复，当前设定已保留，请重试");
     const reused = new Map<string, Character>();
@@ -816,6 +833,7 @@ export default function useStudio() {
         if (acting.thought.trim() && created.speech.length < 6) created.speech.push({ id: crypto.randomUUID(), speakerId: acting.characterId, text: acting.thought, kind: "thought", shape: "cloud", tone: "light", x: .04, y: .55, width: .45, tail: "none" });
       }
       return created; });
+    current.directPages = [];
     if (!current.postText.trim()) current.postText = plan.title;
     await save();
     stage.value = 2;

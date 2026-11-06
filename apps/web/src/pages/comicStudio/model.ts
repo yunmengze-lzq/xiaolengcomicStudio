@@ -107,6 +107,7 @@ const episodeSchema = z.object({
   sourceStory: text.default(""),
   styleSnapshot: styleSchema.nullable(),
   castSnapshot: z.array(characterSchema).max(30),
+  scriptRoles: z.array(z.object({ id: z.string().max(100), name: z.string().max(30), description: z.string().max(1500), personality: z.string().max(1500).default("") })).max(10).default([]),
   roleBindings: z.record(z.string().max(100), z.string().max(100)).default({}),
   panels: z.array(panelSchema).max(50),
   layout: layoutSchema,
@@ -219,6 +220,7 @@ export function createEpisode(project: ComicProject, topic: Topic): Episode {
     sourceStory: "",
     styleSnapshot: style ? JSON.parse(JSON.stringify(style)) : null,
     castSnapshot: JSON.parse(JSON.stringify(project.characters)),
+    scriptRoles: [],
     roleBindings: {},
     panels: [],
     layout: { perPage: 4, fontSize: 30, background: "#ffffff", fontFamily: "wenkai", textMode: "overlay", comicFlavor: true },
@@ -482,7 +484,7 @@ export function productionReady(episode: Episode) {
 export function bindStoryName(episode: Episode, sourceName: string, characterId: string) {
   const person = episode.castSnapshot.find(item => item.id === characterId);
   if (!person) throw new Error("请先选中要绑定的角色");
-  const previousId = episode.roleBindings[sourceName];
+  const previousId = episode.roleBindings[sourceName] || episode.castSnapshot.find(item => item.name === sourceName)?.id;
   const previousName = episode.castSnapshot.find(item => item.id === previousId)?.name;
   const names = [...new Set([sourceName, previousName, ...person.aliases.split(/[,，、;；\n]/).map(value => value.trim())].filter((value): value is string => !!value && value !== person.name))].sort((a, b) => b.length - a.length);
   const replace = (text: string) => {

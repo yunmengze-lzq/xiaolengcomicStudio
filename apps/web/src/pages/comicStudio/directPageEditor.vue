@@ -1,6 +1,6 @@
 <template>
   <div class="directWorkspace">
-    <aside class="pageRail" aria-label="漫画页导航">
+    <aside ref="pageRail" class="pageRail" aria-label="漫画页导航">
       <strong>漫画页 <small>{{ episode.directPages.length }}</small></strong>
       <button v-for="(page, index) in episode.directPages" :key="page.id" class="pageThumb" :aria-pressed="selected === page.id" @click="selected = page.id">
         <img v-if="page.image" :src="imageUrls[page.image]" alt="" /><span v-else class="thumbPlaceholder">{{ String(index + 1).padStart(2, '0') }}</span>
@@ -36,13 +36,24 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { ElMessageBox } from "element-plus";
 import { newPanel, directPageInput } from "./model";
 import type { Episode, Panel } from "./model";
 const props = defineProps<{ episode: Episode; imageUrls: Record<string, string>; busy: boolean; generationIssue: string; progress: { panelId: string; phase: string; elapsedSeconds: number } }>();
 const emit = defineEmits<{ generateAll: []; import: [page: Episode["directPages"][number], file: File]; generate: [page: Episode["directPages"][number]]; resolve: [page: Episode["directPages"][number], accept: boolean] }>();
+const pageRail = ref<HTMLElement>();
 const selected = ref("");
+watch(selected, async () => {
+  await nextTick();
+  const rail = pageRail.value;
+  const thumb = rail?.querySelector<HTMLElement>('[aria-pressed="true"]');
+  if (!rail || !thumb) return;
+  const box = rail.getBoundingClientRect(); const target = thumb.getBoundingClientRect();
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    if (target.left < box.left || target.right > box.right) rail.scrollLeft += target.left - box.left;
+  } else if (target.top < box.top || target.bottom > box.bottom) rail.scrollTop += target.top - box.top;
+});
 const editingPanel = ref("");
 watch(selected, () => { editingPanel.value = ""; });
 watch(() => props.episode.id, () => { selected.value = props.episode.directPages[0]?.id || ""; }, { immediate: true });
@@ -75,15 +86,15 @@ async function removePage(page: Episode["directPages"][number]) {
 </script>
 <style scoped>
 .directWorkspace { display: grid; grid-template-columns: 112px minmax(0, 1fr); border: 1px solid var(--studioLine, #dce4dc); border-radius: 14px; overflow: hidden; background: var(--studioCard, white); min-height: 540px; }
-.pageRail { padding: 14px 10px; display: flex; flex-direction: column; gap: 10px; background: #f0f3ed; border-right: 1px solid #dce4dc; min-width: 0; }
+.pageRail { min-height: 0; overscroll-behavior: contain; padding: 14px 10px; display: flex; flex-direction: column; gap: 10px; background: #f0f3ed; border-right: 1px solid #dce4dc; min-width: 0; }
 .pageRail strong { font-size: 13px; }.pageRail small { font-size: 11px; }
 button { border: 1px solid #cbd6cb; border-radius: 8px; padding: 9px; background: white; color: #284535; cursor: pointer; font: inherit; font-size: 12px; }
 button:disabled { opacity: .5; cursor: not-allowed; }button[aria-pressed="true"] { border: 2px solid #42664b; background: #e4eddf; }.generateButton { background: #365c42; color: white; padding: 12px; font-weight: 600; }
-.pageThumb { display: grid; gap: 5px; text-align: center; }.pageThumb img, .thumbPlaceholder { width: 100%; height: 94px; object-fit: contain; background: #fff; border-radius: 4px; }.thumbPlaceholder { display: grid; place-items: center; font-size: 28px; color: #b1bcae; }
+.pageThumb { flex-shrink: 0; display: grid; gap: 5px; text-align: center; }.pageThumb img, .thumbPlaceholder { width: 100%; height: 94px; object-fit: contain; background: #fff; border-radius: 4px; }.thumbPlaceholder { display: grid; place-items: center; font-size: 28px; color: #b1bcae; }
 .pageEditor { display: grid; grid-template-columns: minmax(220px, 1fr) 290px; min-width: 0; }.pageArtwork { background: #e9ece6; padding: 18px; min-width: 0; }.pageArtwork header { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; color: #526251; margin-bottom: 16px; }.artCanvas figure { margin: 0; }.artCanvas img { display: block; max-width: 100%; max-height: 560px; margin: auto; box-shadow: 0 4px 20px #20302115; }.comparing { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }figcaption { text-align: center; margin: 8px; font-size: 12px; }
-.emptyPage { aspect-ratio: 3/4; background: #fafbf7; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 18px; text-align: center; color: #687566; }.emptyPage span { font-size: 12px; }.pageScript { padding: 18px; display: grid; align-content: start; gap: 14px; min-width: 0; }.pageScript h3 { margin: 0; font-size: 15px; }.hint { font-size: 12px; color: #748071; line-height: 1.6; margin: 0; }label { display: grid; gap: 6px; font-size: 12px; }textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid #d5ddd2; border-radius: 6px; background: white; }textarea { resize: vertical; }.panelDialogue { display: grid; gap: 10px; }.panelChoice { display: flex; align-items: start; margin-top: 10px; }summary { cursor: pointer; font-size: 12px; padding: 8px 0; color: #526650; }details { border-top: 1px solid #e6eae3; }details label, details button { margin-top: 8px; }.pageManagement button { width: 100%; }pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; }.historyImages { display: flex; gap: 6px; flex-wrap: wrap; }.historyImages button { width: 70px; }.historyImages img { width: 100%; }.modelNotice { padding: 10px; font-size: 12px; color: #735c36; background: #fbf4e7; border-radius: 6px; }.candidateActions { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }.emptyWorkspace { padding: 60px 24px; text-align: center; }
-@media (max-width: 1100px) { .pageEditor { grid-template-columns: minmax(180px, 1fr) 250px; }.pageArtwork, .pageScript { padding: 12px; } }
+.emptyPage { aspect-ratio: 3/4; background: #fafbf7; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 18px; text-align: center; color: #687566; }.emptyPage span { font-size: 12px; }.pageScript { min-height: 0; overscroll-behavior: contain; padding: 18px; display: grid; align-content: start; gap: 14px; min-width: 0; }.pageScript h3 { margin: 0; font-size: 15px; }.hint { font-size: 12px; color: #748071; line-height: 1.6; margin: 0; }label { display: grid; gap: 6px; font-size: 12px; }textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid #d5ddd2; border-radius: 6px; background: white; }textarea { resize: vertical; }.panelDialogue { display: grid; gap: 10px; }.panelChoice { display: flex; align-items: start; margin-top: 10px; }summary { cursor: pointer; font-size: 12px; padding: 8px 0; color: #526650; }details { border-top: 1px solid #e6eae3; }details label, details button { margin-top: 8px; }.pageManagement button { width: 100%; }pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; }.historyImages { display: flex; gap: 6px; flex-wrap: wrap; }.historyImages button { width: 70px; }.historyImages img { width: 100%; }.modelNotice { padding: 10px; font-size: 12px; color: #735c36; background: #fbf4e7; border-radius: 6px; }.candidateActions { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }.emptyWorkspace { padding: 60px 24px; text-align: center; }
+@media (max-width: 1100px) { .pageEditor { grid-template-columns: minmax(180px, 1fr) 250px; }.pageArtwork, .pageScript { min-height: 0; overscroll-behavior: contain; padding: 12px; } }
 @media (max-width: 760px) { .directWorkspace { grid-template-columns: 1fr; }.pageRail { flex-direction: row; overflow-x: auto; align-items: start; }.pageThumb { min-width: 80px; }.pageRail > strong { display: none; }.pageEditor { grid-template-columns: 1fr; }.pageArtwork { max-height: 520px; overflow: auto; }.pageRail details { min-width: 100px; }.thumbPlaceholder, .pageThumb img { height: 60px; } }
-@media (min-width: 761px) { .directWorkspace { min-height: 460px; height: max(460px, calc(100vh - 325px)); } .pageRail, .pageScript { overflow-y: auto; } .pageEditor { min-height: 0; } .pageArtwork { overflow-y: auto; } .emptyPage { aspect-ratio: auto; min-height: 360px; height: calc(100% - 40px); box-sizing: border-box; } }
+@media (min-width: 761px) { .directWorkspace { min-height: 460px; height: max(460px, calc(100vh - 325px)); } .pageRail, .pageScript { overflow-y: auto; } .pageEditor { min-height: 0; } .pageArtwork { min-height: 0; overflow-y: auto; overscroll-behavior: contain; } .emptyPage { aspect-ratio: auto; min-height: 360px; height: calc(100% - 40px); box-sizing: border-box; } }
 .pageNavigation { display: flex; gap: 5px; } .pageNavigation button { padding: 4px 8px; }.pageArtwork header { align-items: center; flex-wrap: wrap; }
 </style>

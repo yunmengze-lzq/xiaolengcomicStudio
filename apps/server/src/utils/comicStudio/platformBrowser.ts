@@ -26,7 +26,7 @@ async function openBrowser(platform: Platform) {
       const paths = process.platform === "darwin"
         ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", join(homedir(), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")]
         : process.platform === "win32"
-          ? [join(process.env.PROGRAMFILES || "C:\\Program Files", "Google/Chrome/Application/chrome.exe")]
+          ? [join(process.env.PROGRAMFILES || "C:\\Program Files", "Google/Chrome/Application/chrome.exe"), join(process.env.LOCALAPPDATA || homedir(), "Google/Chrome/Application/chrome.exe"), join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Google/Chrome/Application/chrome.exe")]
           : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
       const executablePath = paths.find((path) => existsSync(path));
       if (!executablePath) throw Object.assign(new Error("请先安装Google Chrome，再打开平台登录浏览器"), { status: 503 });
@@ -61,6 +61,7 @@ export async function platformSession(platform: Platform, action: "open" | "stat
     }
     await pending;
   }
+  if (!sessions.has(platform) && (action === "capture" || action === "search") && existsSync(resolve(process.env.TOONFLOW_DATA_DIR || "data", "platformSessions", platform))) await platformSession(platform, "open");
   const pending = sessions.get(platform);
   if (!pending) {
     if (action === "capture" || action === "search") throw Object.assign(new Error("请先打开平台浏览器，在官方网页本人登录并浏览内容"), { status: 409 });
@@ -100,8 +101,12 @@ export async function platformSession(platform: Platform, action: "open" | "stat
   if (!page) throw Object.assign(new Error("请在专用浏览器打开对应平台的推荐、搜索或视频页面"), { status: 409 });
   if (action === "search") {
     const url = platform === "douyin" ? `https://www.douyin.com/search/${encodeURIComponent(keyword)}` : platform === "bilibili" ? `https://search.bilibili.com/all?keyword=${encodeURIComponent(keyword)}` : platform === "tieba" ? `https://tieba.baidu.com/f/search/res?ie=utf-8&kw=%E5%BC%B1%E6%99%BA&qw=${encodeURIComponent(keyword)}` : `https://www.douban.com/group/search?cat=1013&q=${encodeURIComponent(keyword)}`;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForSelector('a[href*="/video/"], a[href*="/group/topic/"], a[href*="/p/"]', { timeout: 12000 }).catch(() => {});
+    // ACT: Reuse the same search page after a user completes verification; reloading can trigger it again.
+    if (page.url() !== url) await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForFunction(`(() => {
+      const visible = element => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== "hidden"; };
+      return Array.from(document.querySelectorAll('a[href*="/video/"], a[href*="modal_id="], a[href*="/note/"], a[href*="/group/topic/"], a[href*="/p/"], iframe[src*="/verifycenter/captcha/"]')).some(visible);
+    })()`, { timeout: 12000 }).catch(() => {});
   }
   const pageUrl = page.url();
   const readings = await Promise.allSettled(page.frames().filter((frame) => allowed(frame.url(), platform) && !/\/(im|chat|message|passport|login|sso)(\/|$)/i.test(new URL(frame.url()).pathname)).map((frame) => frame.evaluate(`(() => {
@@ -132,14 +137,16 @@ export async function platformSession(platform: Platform, action: "open" | "stat
       if (box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth) fragments.push(text.slice(0, 1500));
     }
     }
-    return { links, description, fragments, challenge: /安全验证|访问过于频繁|操作太频繁/.test(document.body.innerText.slice(0, 2000)) };
+    const verificationFrame = queryAll('iframe[src*="/verifycenter/captcha/"]')
+      .some(element => visible(element) && getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none");
+    return { links, description, fragments, challenge: verificationFrame || /安全验证|访问过于频繁|操作太频繁|请完成下方验证|拖动.*拼图/.test(document.body.innerText.slice(0, 12000)) };
   })()`)));
   const snapshots = readings.filter((item) => item.status === "fulfilled").map((item) => item.value as { links: { url: string; title: string }[]; description: string[]; fragments: string[]; challenge: boolean });
   const raw = { links: snapshots.flatMap((item) => item.links), description: snapshots.flatMap((item) => item.description), fragments: snapshots.flatMap((item) => item.fragments), challenge: snapshots.some((item) => item.challenge) };
-  if (raw.challenge) throw Object.assign(new Error("平台要求安全验证或限制访问，请在官网登录窗口本人处理后重试"), { status: 409 });
+  if (raw.challenge) throw Object.assign(new Error("平台需要本人完成验证码：请在专用浏览器完成验证，再点“收集当前可见内容”或用同一关键词重试；账号登录不代表已通过验证"), { status: 409 });
   const observedAt = new Date().toISOString();
   const normalizedLinks = raw.links.map((item) => { try { const url = new URL(item.url); const modal = url.searchParams.get("modal_id"); return platform === "douyin" && modal && /^\d+$/.test(modal) ? { ...item, url: `https://www.douyin.com/video/${modal}` } : item; } catch { return item; } });
-  const pathPattern = platform === "tieba" ? /^\/p\/\d+$/ : platform === "douban" ? /^\/group\/topic\/\d+\/?$/ : /\/video\/(?:BV[a-zA-Z0-9]{10}|\d+)/;
+  const pathPattern = platform === "tieba" ? /^\/p\/\d+$/ : platform === "douban" ? /^\/group\/topic\/\d+\/?$/ : platform === "douyin" ? /^\/(?:video|note)\/\d+\/?$/ : /\/video\/BV[a-zA-Z0-9]{10}/;
   const candidates = normalizedLinks.filter((item) => allowed(item.url, platform) && pathPattern.test(new URL(item.url).pathname) && item.title.length > 3 && !(platform === "bilibili" && /^[\d\s.,:：万亿]+$/.test(item.title)));
   if (platform === "douyin" && /\/video\/\d+/.test(new URL(pageUrl).pathname) && raw.description[0]) candidates.unshift({ url: pageUrl, title: raw.description[0] });
   const unique = [...new Map(candidates.map((item) => {
