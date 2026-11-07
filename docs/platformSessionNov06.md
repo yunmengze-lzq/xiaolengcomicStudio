@@ -25,3 +25,5 @@
 
 - https://github.com/xpzouying/xiaohongshu-mcp/blob/main/login_session.go
 - https://github.com/xpzouying/xiaohongshu-mcp/blob/main/cookies/cookies.go
+
+2026-11-07：用户已反馈完成抖音验证，随后明确要求停止验证、直接上传并导出安装包；因此不继续请求扫码或平台采集。Windows 2.0.2 构建成功，源码为 ad09738，运行记录见 sharingGuide.md。

@@ -61,3 +61,11 @@ Windows x64 云端构建已通过：[构建记录](https://github.com/yunmengze-
 分享给朋友：发送安装 exe 或含 exe 与说明的 zip；朋友解压后运行安装程序，进入设置配置自己的文本/识图模型及生图服务。在线 API 不需要安装本地生图权重；Windows 本地生图走 ComfyUI 安装引导，MLX 安装入口仅用于 Apple Silicon Mac。包内不含模型权重、开发机数据或密钥。
 
 Windows 安装包尚未完成真实桌面安装、启动和卸载验收，且没有代码签名。先作为小范围测试包分享；系统拦截时不要要求朋友关闭安全软件，应核对来源、校验值与具体提示。Mac 当前仍是此前 2.0.0 Apple Silicon 测试包，不要把两个平台版本号混为同一验收版本。
+
+## Windows 2.0.2 测试包 · 2026-11-07
+
+- 构建成功：https://github.com/yunmengze-lzq/xiaolengcomicStudio/actions/runs/42373003062
+- 对应源码提交：`ad09738988f8dcb9f531f524a9b8f3b73387e25c`。包括漫画流程与角色绑定整理、设置收敛、多页滚动，以及平台会话修复。
+- 分享压缩包：`build/desktop/share/xiaolengComicWindows202.zip`，其中运行 `xiaolengComic2.0.2Setup.exe` 即可安装。旧版 2.0.1 保留，便于回退。
+- 按用户要求停止进一步平台登录与采集验证。小红书重新登录后的搜索、抖音验证后的采集及 Windows 真机安装仍未完成验收；不是已验证稳定版。
+- 包内附使用说明、许可与 SHA-256 校验值，不含个人数据、账号或模型权重。
