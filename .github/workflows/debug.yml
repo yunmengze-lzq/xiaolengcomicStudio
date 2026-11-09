@@ -165,9 +165,12 @@ jobs:
       - name: 编译 macOS 13 Intel 原生 SDK
         if: matrix.target == 'macX64'
         run: bun compat/macIntel/prepareNative.ts
-      - name: 准备 Electrobun SDK
-        if: matrix.target != 'macX64' && matrix.target != 'androidArm64'
-        shell: ${{ matrix.platform == 'win32' && 'pwsh' || 'bash' }}
+      - name: 准备 Windows Electrobun SDK
+        if: matrix.target == 'windowsX64'
+        shell: pwsh
+        run: bun apps/desktop/node_modules/electrobun/bin/electrobun.cjs prepare
+      - name: 准备 ARM Mac Electrobun SDK
+        if: matrix.target == 'macArm64'
         run: bun apps/desktop/node_modules/electrobun/bin/electrobun.cjs prepare
       - name: 编译 macOS 原生启动库
         if: runner.os == 'macOS'
