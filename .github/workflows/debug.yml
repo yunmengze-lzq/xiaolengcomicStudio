@@ -167,7 +167,7 @@ jobs:
         run: bun compat/macIntel/prepareNative.ts
       - name: 准备 Electrobun SDK
         if: matrix.target != 'macX64' && matrix.target != 'androidArm64'
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        shell: ${{ matrix.platform == 'win32' && 'pwsh' || 'bash' }}
         run: bun apps/desktop/node_modules/electrobun/bin/electrobun.cjs prepare
       - name: 编译 macOS 原生启动库
         if: runner.os == 'macOS'
