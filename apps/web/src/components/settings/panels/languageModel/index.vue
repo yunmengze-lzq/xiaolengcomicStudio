@@ -32,11 +32,11 @@
     </div>
     <p v-if="comicStudio && !sortedProviders.length" class="providerEmpty">还没有文本API服务。可在默认任务中使用本机Codex，或在这里添加你的供应商。</p>
     <div class="providerActions">
-      <el-button class="addButton" :icon="IconPlus" @click="openProvider">添加供应商</el-button>
-      <el-button class="addButton" :icon="IconSettings" @click="openCustomProvider()">添加自定义供应商</el-button>
+      <el-button v-if="!comicStudio" class="addButton" :icon="IconPlus" @click="openProvider">添加供应商</el-button>
+      <el-button class="addButton" :icon="IconSettings" @click="openCustomProvider()">{{ comicStudio ? "＋ 添加文本 / 识图服务" : "添加自定义供应商" }}</el-button>
     </div>
     <component :is="addProviderDialog" v-model="providerDialogVisible" :comicStudio="comicStudio" />
-    <component :is="addCustomProviderDialog" v-model="customProviderDialogVisible" :provider="editingProvider" />
+    <component :is="addCustomProviderDialog" v-model="customProviderDialogVisible" :provider="editingProvider" :comicStudio="comicStudio" />
   </div>
 </template>
 

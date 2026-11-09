@@ -32,6 +32,7 @@
           </div>
           <messageMarkdown v-if="providerReadme && (!comicStudio || ['comfyLocal', 'imageApi'].includes(selectedProvider))" class="providerReadme" :content="providerReadme" />
           <el-divider v-if="providerReadme && (!comicStudio || selectedProvider === 'comfyLocal')" contentPosition="left">连接配置</el-divider>
+          <label v-if="selectedProvider === 'imageApi'">服务名称<el-input v-model="instanceName" maxlength="80" placeholder="例如：主力生图、备用生图" /></label>
           <form-create v-model:api="formApi" :rule="providerRules" :option="formOptions" />
           <div class="modelHeader">
             <el-text tag="strong">模型列表 <el-text type="info">{{ models.length }}</el-text></el-text>
@@ -151,7 +152,14 @@ const formApi = shallowRef<Api>();
 const addedProvider = shallowRef<MediaProvider>();
 const formOptions = computed<Options>(() => ({ form: { labelPosition: "top", disabled: saving.value }, submitBtn: false, resetBtn: false }));
 const providerRules = computed(() => formCreate.copyRules([...(activeProvider.value?.rules ?? [])]));
-const source = computed(() => mode === "builtin" ? providerSources[selectedProvider.value] ?? "" : activeTab.value === "file" ? fileSource.value : code.value);
+const instanceName = ref("在线图片 API");
+const instanceId = ref(`imageApi${crypto.randomUUID().replaceAll("-", "")}`);
+const source = computed(() => {
+  if (mode !== "builtin") return activeTab.value === "file" ? fileSource.value : code.value;
+  const template = providerSources[selectedProvider.value] ?? "";
+  if (selectedProvider.value !== "imageApi") return template;
+  return template.replace('id: "imageApi"', `id: ${JSON.stringify(instanceId.value)}`).replace('label: "在线图片 API · 兼容 Images 接口"', () => `label: ${JSON.stringify(instanceName.value.trim() || "在线图片 API")}`);
+});
 
 watch([activeTab, selectedProvider], () => {
   formError.value = "";
@@ -164,6 +172,8 @@ watch(visible, value => {
   openingAgent.value = false;
   if (!value) { agentVisible.value = false; return; }
   selectedProvider.value = availableProviders.value[0]?.id ?? "";
+  instanceId.value = `imageApi${crypto.randomUUID().replaceAll("-", "")}`;
+  instanceName.value = "在线图片 API";
   activeTab.value = "file";
   promptExpanded.value = false;
   formApi.value = undefined;

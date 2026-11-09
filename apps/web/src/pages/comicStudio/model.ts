@@ -29,6 +29,8 @@ const topicSchema = z.object({
   heat: z.number().nonnegative().optional(),
 });
 export const memeIdeaSchema = z.object({
+  storyMode: z.enum(["satire", "science", "drama"]).optional(),
+  tone: z.string().max(80).optional(),
   topicId: id,
   theme: z.enum(["情感关系", "生活趣事", "工作职场", "学习成长", "哲学思考", "科学好奇", "MBTI趣谈"]),
   hook: z.string().min(1).max(160),
@@ -46,6 +48,8 @@ const speechSchema = z.object({
   x: z.number().min(0).max(0.95),
   y: z.number().min(0).max(0.95),
   width: z.number().min(0.15).max(0.95),
+  height: z.number().min(.06).max(.85).optional(),
+  fontSize: z.number().min(12).max(80).optional(),
   kind: z.enum(["dialogue", "thought", "narration"]).default("dialogue"),
   shape: z.enum(["oval", "cloud", "burst", "box"]).default("oval"),
   tone: z.enum(["light", "dark"]).default("light"),
@@ -92,6 +96,7 @@ const directPageSchema = panelSchema.extend({
 });
 const episodeSchema = z.object({
   storyMode: z.enum(["satire", "science", "drama"]).default("satire"),
+  coverPage: z.number().int().min(0).max(49).optional(),
   targetPanels: z.number().int().min(2).max(12).default(8),
   productionMode: z.enum(["panels", "direct"]).default("panels"),
   directPages: z.array(directPageSchema).max(50).default([]),

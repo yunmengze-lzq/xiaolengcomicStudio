@@ -18,9 +18,16 @@
         </template>
       </aside>
       <section class="content" :aria-label="activePanel.label" tabindex="0">
-        <nav v-if="props.comicStudio && sectionPanels.length > 1" class="settingsSubnav" aria-label="当前设置分组"><button v-for="item in sectionPanels" :key="item.id" :aria-pressed="activePanel.id === item.id" @click="panel = item.id">{{ item.label }}</button></nav>
-        <h2 class="panelTitle">{{ activePanel.label }}</h2>
+        <nav v-if="props.comicStudio && !modelSection && sectionPanels.length > 1" class="settingsSubnav" aria-label="当前设置分组"><button v-for="item in sectionPanels" :key="item.id" :aria-pressed="activePanel.id === item.id" @click="panel = item.id">{{ item.label }}</button></nav>
+        <h2 class="panelTitle">{{ modelSection ? "模型与生成" : activePanel.label }}</h2>
         <div class="panelContent">
+          <template v-if="modelSection">
+            <nav class="settingsSubnav" aria-label="模型设置步骤"><button v-for="item in modelViews" :key="item.id" :aria-pressed="modelView === item.id" @click="panel = item.id === 'tasks' ? 'comicDefaults' : item.id === 'local' ? 'comicLocal' : modelTab">{{ item.label }}</button></nav>
+            <slot v-if="modelView === 'tasks'" name="comicDefaults" />
+            <template v-else-if="modelView === 'services'"><div class="modelPurpose"><strong>添加一次，供多个任务选择</strong><p>文本与识图共用 API 服务库；生图使用图片接口或工作流。供应商、模型与任务是三个不同选择。</p><nav class="settingsSubnav"><button v-for="item in modelTabs.filter(item => item.id !== 'comicLocal')" :key="item.id" :aria-pressed="modelTab === item.id" @click="panel = item.id">{{ item.label }}</button></nav></div><component :is="settingsPanels.find(item => item.id === modelTab)?.component" :visible="visible" :comicStudio="true" /><button class="returnTasks" @click="panel = 'comicDefaults'">配置完成，返回分配任务 →</button></template>
+            <slot v-else name="comicLocal" />
+          </template>
+          <template v-else>
           <div v-if="props.comicStudio && ['languageModel', 'mediaModel'].includes(activePanel.id)" class="modelPurpose"><p>{{ activePanel.id === 'languageModel' ? '管理编剧、选梗和分析使用的文本服务。可添加云端API，也可配置本机OpenAI兼容服务。' : '管理角色、画风和分格出图服务。支持已有图片供应商，以及本机ComfyUI工作流。' }}</p></div>
           <div v-if="activePanel.id.startsWith('comic')" :key="activePanel.id">
             <slot :name="activePanel.id" />
@@ -33,6 +40,7 @@
                   { ...(['pluginMarket', 'languageModel', 'mediaModel', 'personalization', 'deviceLink'].includes(activePanel.id) ? { visible } : {}), ...(['languageModel', 'mediaModel', 'ui'].includes(activePanel.id) ? { comicStudio: props.comicStudio } : {}) }
                 " />
             </keep-alive>
+          </template>
         </div>
       </section>
     </div>
@@ -40,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import { isMobile } from "@/lib/platform";
 import {
@@ -117,10 +125,17 @@ const visiblePanels = computed(() => props.comicStudio ? [
 ] : availablePanels.value);
 const activePanel = computed(() => availablePanels.value.find((item) => item.id === panel.value) || availablePanels.value[0]!);
 const sectionPanels = computed(() => availablePanels.value.filter(item => settingsSection(item.id) === settingsSection(activePanel.value.id)).sort((a, b) => ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(a.id) - ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(b.id)));
+const modelTabs = [{ id: "languageModel", label: "文本与识图 API" }, { id: "mediaModel", label: "生图 API / ComfyUI" }, { id: "comicLocal", label: "本地环境与安装" }];
+const modelTab = ref("languageModel");
+const modelView = ref("tasks");
+const modelViews = [{id:"tasks",label:"任务配置"},{id:"services",label:"服务管理"},{id:"local",label:"本地安装与连接"}];
+const modelSection = computed(() => props.comicStudio && settingsSection(activePanel.value.id) === "comicDefaults");
 const visible = defineModel<boolean>({ default: false });
+watch([panel, () => visible.value], ([value]) => { modelView.value = value === "comicLocal" ? "local" : ["languageModel", "mediaModel"].includes(value) ? "services" : "tasks"; if (["languageModel", "mediaModel"].includes(value)) modelTab.value = value; }, { immediate: true });
 </script>
 
 <style lang="scss" scoped>
+.returnTasks { margin-top:20px; padding:12px 18px; border:1px solid var(--el-color-primary); color:var(--el-color-primary); background:var(--el-bg-color); border-radius:8px; cursor:pointer; }
 .settingsSubnav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; button { padding: 8px 12px; border: 1px solid var(--el-border-color); border-radius: 8px; color: var(--el-text-color-primary); background: var(--el-bg-color); cursor: pointer; &[aria-pressed="true"] { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary); } } }
 .modelPurpose { padding: 16px; border: 1px solid var(--el-border-color); border-radius: 10px; margin-bottom: 20px; background: var(--el-fill-color-light); p { margin: 0 0 12px; line-height: 1.7; } button { margin: 0 12px 5px 0; padding: 8px 12px; border: 1px solid var(--el-border-color); background: var(--el-bg-color); color: var(--el-text-color-primary); border-radius: 6px; cursor: pointer; font: inherit; } }
 

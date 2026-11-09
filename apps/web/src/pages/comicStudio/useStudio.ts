@@ -62,7 +62,15 @@ export default function useStudio() {
   const zImageQuality = ref(z.enum(["draft", "standard", "detail"]).catch("standard").parse(appSettings.value.comicZImageQuality));
   watch(zImageQuality, (value) => { appSettings.value.comicZImageQuality = value; });
   const zImageReferenceMode = ref(z.enum(["text", "reference"]).catch("text").parse(appSettings.value.comicZImageReferenceMode));
-  const referenceAnalysisMode = ref(z.enum(["selected", "codex"]).catch("selected").parse(appSettings.value.comicReferenceAnalysisMode));
+  const discoveryPlatforms = ref(z.array(z.enum(["douyin", "bilibili", "xhsLocal", "tieba", "douban"])).catch(["douyin", "bilibili", "xhsLocal"]).parse(appSettings.value.comicDiscoveryPlatforms));
+  const discoveryMode = ref(z.enum(["satire", "science", "drama"]).catch("satire").parse(appSettings.value.comicDiscoveryMode));
+  const discoveryTone = ref(z.string().max(80).catch("").parse(appSettings.value.comicDiscoveryTone));
+  watch(discoveryPlatforms, value => { appSettings.value.comicDiscoveryPlatforms = value; }, { deep: true });
+  watch(discoveryMode, value => { appSettings.value.comicDiscoveryMode = value; });
+  watch(discoveryTone, value => { appSettings.value.comicDiscoveryTone = value; });
+  const referenceModel = ref(z.string().catch("").parse(appSettings.value.comicReferenceModel));
+  watch(referenceModel, value => { appSettings.value.comicReferenceModel = value; });
+  const referenceAnalysisMode = ref(z.enum(["selected", "codex", "api"]).catch("selected").parse(appSettings.value.comicReferenceAnalysisMode));
   watch(referenceAnalysisMode, (value) => { appSettings.value.comicReferenceAnalysisMode = value; });
   watch(zImageReferenceMode, (value) => { appSettings.value.comicZImageReferenceMode = value; });
   const textMode = ref<"codex" | "api">("codex");
@@ -136,7 +144,7 @@ export default function useStudio() {
       previewUrls.value.forEach(URL.revokeObjectURL);
       previewUrls.value = [];
       previewMessage.value = "";
-      if (![5, 6].includes(stage.value) || !episode.value?.panels.length) return;
+      if (![5, 6, 7].includes(stage.value) || !episode.value || !(episode.value.productionMode === "direct" ? episode.value.directPages.length : episode.value.panels.length)) return;
       previewTimer = setTimeout(() => {
         void preview().catch((error) => { previewMessage.value = error instanceof Error ? error.message : "排版预览失败"; });
       }, 400);
@@ -423,12 +431,12 @@ export default function useStudio() {
     if (version !== modelLoadVersion) return;
     if (results[0].status === "fulfilled") textModels.value = results[0].value.data.data;
     if (results[1].status === "fulfilled") {
-      const metadata = results[2].status === "fulfilled" ? z.array(z.object({ id: z.string(), rules: z.array(z.object({ field: z.string().optional() })).optional() })).safeParse(results[2].value.data.data) : undefined;
+      const metadata = results[2].status === "fulfilled" ? z.array(z.object({ id: z.string(), label: z.string().optional(), rules: z.array(z.object({ field: z.string().optional() })).optional() })).safeParse(results[2].value.data.data) : undefined;
       const configurations = appSettings.value.mediaProviderConfigs as Record<string, { apiKey?: string; workflow?: string; baseUrl?: string; modelId?: string }> | undefined;
       imageModels.value = results[1].value.data.data.filter((item: Model) => item.type === "image").map((item: Model) => {
         const provider = metadata?.success ? metadata.data.find((entry) => entry.id === item.providerId) : undefined;
-        const configured = item.providerId === "imageApi" ? !!configurations?.imageApi?.apiKey?.trim() && !!configurations?.imageApi?.baseUrl?.trim() && !!configurations?.imageApi?.modelId?.trim() : item.providerId === "comfyLocal" ? !!configurations?.comfyLocal?.workflow?.trim() : !!provider && (!provider.rules?.some((rule) => rule.field === "apiKey") || !!configurations?.[item.providerId]?.apiKey?.trim());
-        return { ...item, configured, label: configured ? (item.providerId === "imageApi" ? `在线API · ${configurations?.imageApi?.modelId || item.label}` : item.providerId === "comfyLocal" ? `本地 ComfyUI · ${item.label}（工作流已保存）` : item.label) : `${item.label}（未完成配置）` };
+        const configured = item.providerId.startsWith("imageApi") ? !!configurations?.[item.providerId]?.apiKey?.trim() && !!configurations?.[item.providerId]?.baseUrl?.trim() && !!configurations?.[item.providerId]?.modelId?.trim() : item.providerId === "comfyLocal" ? !!configurations?.comfyLocal?.workflow?.trim() : !!provider && (!provider.rules?.some((rule) => rule.field === "apiKey") || !!configurations?.[item.providerId]?.apiKey?.trim());
+        return { ...item, configured, label: configured ? (item.providerId.startsWith("imageApi") ? `${provider?.label || "在线API"} · ${configurations?.[item.providerId]?.modelId || item.label}` : item.providerId === "comfyLocal" ? `本地 ComfyUI · ${item.label}（工作流已保存）` : item.label) : `${item.label}（未完成配置）` };
       });
     }
     const cli = results[3].status === "fulfilled" ? results[3].value.data.data : undefined;
@@ -480,10 +488,10 @@ export default function useStudio() {
     if (unreadable) ElMessage.warning(`${unreadable} 个本机漫画项目无法读取，未加入列表；已有项目仍可打开`);
   }
 
-  async function refreshTopics(sourceId = source.value) {
+  async function refreshTopics(sourceId = source.value, keyword = searchKeyword.value) {
     if (!project.value) return;
     const { data } = await axios.get(["douban", "tieba"].includes(sourceId) ? "/api/comicStudio/forumTopics" : "/api/comicStudio/topics", {
-      params: { source: sourceId, keyword: sourceId === "xhsLocal" ? searchKeyword.value : undefined },
+      params: { source: sourceId, keyword: sourceId === "xhsLocal" ? keyword : undefined },
       timeout: 100000,
       headers: { "x-toonflow-workspace": "1" },
     }).catch(error => {
@@ -568,11 +576,11 @@ export default function useStudio() {
   async function discoverMemes(useCollected = false) {
     const fresh = useCollected ? project.value?.topics : await refreshTopics();
     if (!project.value) return;
-    const unique = [...new Map((fresh || []).filter(item => item.kind === "hotSearch" || item.kind === "search").map(item => [item.url || item.title, item])).values()];
+    const unique = [...new Map((fresh || []).filter(item => item.title.trim()).map(item => [item.url || item.title, item])).values()];
     const sources = [...new Set(unique.map(item => item.source))];
     const groups = sources.map(source => unique.filter(item => item.source === source).sort((a, b) => Number(b.summary.includes("文字正文")) - Number(a.summary.includes("文字正文"))));
     const candidates = Array.from({ length: Math.max(0, ...groups.map(group => group.length)) }, (_, index) => groups.flatMap(group => group[index] ? [group[index]!] : [])).flat().slice(0, 80);
-    if (!candidates.length) throw new Error("请选择抖音热榜或小红书来源，先获取平台候选");
+    if (!candidates.length) throw new Error("请先搜索或读取一个平台，取得可用素材后再生成提案");
     const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
     busy.value = "分析生活与剧情梗的改编潜力…";
     const { data } = await axios.post(
@@ -583,6 +591,8 @@ export default function useStudio() {
         providerId: selected?.providerId,
         modelId: selected?.modelId,
         codexModel: textMode.value === "codex" ? codexModel.value || undefined : undefined,
+        storyMode: discoveryMode.value,
+        tone: discoveryTone.value,
         candidates: candidates.map((item) => ({
           id: item.id,
           title: item.title,
@@ -596,13 +606,14 @@ export default function useStudio() {
     const result = z.object({ ideas: z.array(memeIdeaSchema).max(12) }).parse(data.data);
     const known = new Set(candidates.map((item) => item.id));
     if (result.ideas.some((item) => !known.has(item.topicId))) throw new Error("选梗结果引用了未知来源，当前结果未被替换");
-    project.value.memeIdeas = result.ideas.map((item) => ({ ...item, createdAt: new Date().toISOString() }));
+    project.value.memeIdeas = result.ideas.map((item) => ({ ...item, storyMode: discoveryMode.value, tone: discoveryTone.value, createdAt: new Date().toISOString() }));
     await save();
     if (!result.ideas.length) ElMessage.info("这批候选没有合适的剧情梗，可换关键词或来源。没有强行生成推荐。");
   }
 
   async function discoverAcrossPlatforms() {
-    await collectResearch(searchKeyword.value, ["douyin", "bilibili", "xhsLocal", "tieba", "douban"]);
+    if (!discoveryPlatforms.value.length) throw new Error("请至少选择一个平台");
+    await collectResearch(searchKeyword.value, discoveryPlatforms.value);
     const pack = project.value?.researchPacks[0];
     if (!pack) return;
     const targetDirectory = directory.value;
@@ -626,12 +637,13 @@ export default function useStudio() {
     const topic = project.value?.topics.find((item) => item.id === idea.topicId);
     if (!topic || !project.value) throw new Error("原始线索已不在候选中，请重新收集");
     const created = createEpisode(project.value, topic);
+    created.storyMode = idea.storyMode || discoveryMode.value;
     created.title = idea.hook.slice(0, 200);
     created.researchPackId = project.value.researchPacks.find(pack => pack.materials.some(item => item.id === idea.topicId))?.id || "";
     created.topic.summary = `原创虚构改编，仅借关键词作灵感，不代表来源原文或真实事件。\n原始线索平台：${created.topic.source}\n${created.topic.summary}`.slice(0, 20000);
     created.topic.source = "原创灵感";
     created.topic.verified = true;
-    created.direction = `原创${idea.theme}漫画。以下均为原创改编方案，不是原梗剧情复述。\n开场：${idea.setup}\n冲突：${idea.conflict}\n反转：${idea.twist}\n核对要求：${idea.verification}\n用原创角色演绎4–6格，保留铺垫和因果；不编造来源故事或已核实事实。`;
+    created.direction = `内容语气：${idea.tone || "自然表达"}。原创${idea.theme}漫画。以下均为原创改编方案，不是原梗剧情复述。\n情境/问题：${idea.setup}\n展开/解释：${idea.conflict}\n落点/变化：${idea.twist}\n核对要求：${idea.verification}\n用原创角色演绎4–6格，保留铺垫和因果；不编造来源故事或已核实事实。`;
     project.value.episodes.unshift(created);
     project.value.activeEpisodeId = created.id;
     stage.value = 1;
@@ -926,10 +938,11 @@ export default function useStudio() {
 
   async function analyzeReferences(target: Character | ComicProject["styleDraft"], purpose: "character" | "style") {
     if (!target.refs.length || target.refs.length > 4) throw new Error("一次请选择1–4张参考图分析");
-    const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
+    const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === (referenceAnalysisMode.value === "api" ? referenceModel.value : textModel.value));
     const targetDirectory = directory.value;
     const paths = target.refs.map((item) => item.path);
-    const mode = referenceAnalysisMode.value === "codex" ? "codex" : textMode.value;
+    const mode = referenceAnalysisMode.value !== "selected" ? referenceAnalysisMode.value : textMode.value;
+    if (mode === "api" && !selected) throw new Error("请在设置中选择图片分析模型");
     const { data } = await axios.post("/api/comicStudio/referenceAnalysis", { directory: targetDirectory, mode, providerId: mode === "api" ? selected?.providerId : undefined, modelId: mode === "api" ? selected?.modelId : undefined, codexModel: codexModel.value || undefined, purpose, intent: target.referenceIntent, request: `${target.description}\n${"personality" in target ? `性格：${target.personality}；动机：${target.motivation}；画风：${target.artDirection}；输出视图：${target.designView}` : ""}\n全篇画风：${activeStyle.value?.description || ""}\n${target.refs.map((item) => item.note).join("\n")}`.slice(0, 5000), paths }, { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 });
     const result = z.object({ analysis: z.string().min(1).max(3000), visualSummary: z.string().max(1000).optional() }).parse(data.data);
     if (directory.value !== targetDirectory || JSON.stringify(paths) !== JSON.stringify(target.refs.map((item) => item.path))) return;
@@ -1131,8 +1144,8 @@ export default function useStudio() {
   }
 
   async function analyzeLibrary(input: { directory: string; purpose: "character" | "style"; intent: "identity" | "redesign" | "style"; request: string; paths: string[] }) {
-    const mode = input.paths.length && referenceAnalysisMode.value === "codex" ? "codex" : textMode.value;
-    const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value);
+    const mode = input.paths.length && referenceAnalysisMode.value !== "selected" ? referenceAnalysisMode.value : textMode.value;
+    const selected = textModels.value.find((item) => `${item.providerId}/${item.modelId}` === (input.paths.length && referenceAnalysisMode.value === "api" ? referenceModel.value : textModel.value));
     if (mode === "api" && !selected) throw new Error("请在设置中选择文本模型；图片分析须使用支持识图的模型");
     const { data } = await axios.post("/api/comicStudio/referenceAnalysis", { ...input, mode, providerId: selected?.providerId, modelId: selected?.modelId, codexModel: codexModel.value || undefined }, { headers: { "x-toonflow-workspace": "1" }, timeout: 260000 });
     return data.data;
@@ -1157,6 +1170,8 @@ export default function useStudio() {
     const archive: Record<string, Uint8Array> = {};
     for (let index = 0; index < pages.length; index++)
       archive[`page${String(index + 1).padStart(2, "0")}.png`] = new Uint8Array(await pages[index]!.arrayBuffer());
+    const cover = pages[Math.min(current.coverPage ?? 0, pages.length - 1)];
+    if (cover) archive["cover.png"] = new Uint8Array(await cover.arrayBuffer());
     archive["publish.txt"] = strToU8(publicationText(current));
     archive["internalReview.txt"] = strToU8(`仅供创作者审核，不是发布正文。\n生成方式：请结合素材来源记录确认 AI 辅助情况，并按发布平台要求完成标识。\n参考来源：${current.topic.url || current.topic.source}\n风格版本：${current.styleSnapshot?.name} (${current.styleSnapshot?.id})\n参考素材包：${current.researchPackId || "无"}\n`);
     archive["readme.txt"] = strToU8(`小冷漫画发布包\n${current.productionMode === "direct" ? "整页成品按模型原始尺寸导出 PNG，不重复叠加字幕" : "成品为 1080×1440 PNG"}，按 page01、page02 顺序发布。\n${current.productionMode === "direct" ? "整页包含模型绘制或导入的对白，请核对错字和画面内容。" : `每页 ${current.layout.perPage} 格；字体 ${current.layout.fontFamily}；文字模式 ${current.layout.textMode}。文字已经绘制进 PNG，不依赖读者安装字体。`}\nepisode.json 保留故事、分镜、多角色对白、角色与美术快照。assets 为实际使用的原始图片。\n发布前请按平台要求声明 AI 辅助创作，软件未自动发布。\n`);
@@ -1202,6 +1217,10 @@ export default function useStudio() {
       finally { clearInterval(generationTimer); generationProgress.active = false; busy.value = ""; }
     },
     referenceAnalysisMode,
+    referenceModel,
+    discoveryPlatforms,
+    discoveryMode,
+    discoveryTone,
     analyzeReferences,
     startFromStory,
     archivedProjects,

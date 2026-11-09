@@ -2,7 +2,7 @@
   <div class="comicStudio" :class="{ nightStudio: studioTheme === 'night', largeStudio: studioDensity === 'large', sidebarCollapsed }" :style="studioColors">
     <aside class="studioSidebar" aria-label="主导航">
       <div class="sidebarTop"><a class="studioBrand" href="#/comicStudio">
-        <span class="brandMark"><img src="/xiaolengMark.svg" alt="小冷漫画雪花气泡标志" /></span>
+        <span class="brandMark"><img src="/xiaolengMark.svg" alt="小冷漫画抱书形象" /></span>
         <span v-if="!sidebarCollapsed">
           小冷漫画
           <span class="brandSub">生活有梗，落笔成画</span>
@@ -111,28 +111,10 @@
         <personalHub v-else-if="workspaceMode === 'archive'" :key="directory" :section="archiveView" :archiveOnly="true" :project="project" :directory="directory" :disabled="!!busy || saving" :imageUrls="imageUrls" :canAnalyze="textMode === 'codex' || !!textModel" @save="run('保存创作档案', save)" @original="(direction) => run('创建原创选题', async () => { await startOriginal(direction); workspaceMode = 'studio'; })" />
         <template v-else>
 
-          <div v-if="![0, 1, 2, 3, 4, 5].includes(stage)" class="pageHeading">
-            <div>
-              <span class="eyebrow">{{ stages[stage]!.eyebrow }}</span>
-              <h1>{{ stages[stage]!.heading }}</h1>
-              <p>{{ stages[stage]!.description }}</p>
-            </div>
-            <div v-if="episode" class="episodeBadge">
-              <span>当前作品</span>
-              <strong>{{ episode.title }}</strong>
-              <small>{{ episode.styleSnapshot?.name || "尚未绑定美术版本" }}</small>
-            </div>
-          </div>
-
-          <div v-if="episode && stage > 0 && ![1, 2, 3, 4, 5].includes(stage)" class="productionStatus" aria-label="本期制作状态">
-            <button @click="stage = 1">{{ episode.story ? '✓' : '○' }} 故事脚本</button>
-            <button @click="stage = 3">{{ episode.styleSnapshot ? '✓' : '○' }} 美术风格 · {{ episode.castSnapshot.length }} 位角色</button>
-            <button @click="stage = 4">{{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).filter((panel) => panel.image).length }} / {{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).length }} {{ episode.productionMode === 'direct' ? '页' : '格' }}出图</button>
-            <button @click="stage = 6">整体效果预览</button>
-          </div>
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
           <div v-if="busy.startsWith('整页生成 ')" class="batchControl" role="status"><span>{{ busy }} · 不覆盖已有页面</span><button class="secondaryButton" :disabled="stopDirectBatch" @click="stopDirectBatch = true">{{ stopDirectBatch ? '当前页结束后停止' : '当前页完成后停止' }}</button></div>
-          <div v-if="busy && [0, 1, 2, 3].includes(stage)" class="taskWaiting" role="status" aria-live="polite"><progress aria-label="任务处理中"></progress><div><strong>{{ busy }}</strong><p>正在处理，请稍候。文本模型可能需要数分钟；完成后会自动显示结果，请勿重复提交。</p></div></div>
+          <div v-if="busy && ![4, 5].includes(stage)" class="taskWaiting" role="status" aria-live="polite"><progress aria-label="任务处理中"></progress><div><strong>{{ busy }}</strong><p>正在处理，请稍候。文本模型可能需要数分钟；完成后会自动显示结果，请勿重复提交。</p></div></div>
+          <p v-if="removedPanel && removedPanel.episodeId === episode?.id" role="status">已移除画格，原图与编排快照保留。<button class="textButton" @click="restoreStoryboardPanel">撤销移除</button></p>
           <fieldset class="stageFields" :disabled="!!busy || saving">
             <section v-if="stage === 0" class="topicsStage">
               <header class="discoveryHeader"><div><span class="eyebrow">START A STORY</span><h1>今天，想画什么故事？</h1><p>带着自己的想法开始，或从生活热点里找灵感。</p></div><details v-if="project.episodes.length" class="resumeStories"><summary>继续已有作品 · {{ project.episodes.length }}</summary><button v-for="item in project.episodes" :key="item.id" @click="project.activeEpisodeId = item.id; stage = 1">{{ item.title }}</button></details></header>
@@ -142,15 +124,17 @@
               <div v-if="ideaMode === 'series'" class="surface"><h2>一句想法也能开始</h2><p class="helperText">先建立选题，下一步再生成脚本并选择出场角色。</p><label for="studioOriginal">生活观察或关键词</label><input id="studioOriginal" v-model="originalDirection" maxlength="3500" placeholder="例如：下班后只想安静的 I 人，和热情的同事" /><details class="castingOptions"><summary>出场角色 · 可稍后选角</summary><label for="originalCastMode">角色方式</label><select id="originalCastMode" v-model="originalCastMode"><option value="new">先创作故事，AI 建立新角色</option><option value="fixed" :disabled="!project.characters.length">使用固定角色库 · {{ project.characters.length }} 位</option></select><div v-if="originalCastMode === 'fixed'" class="inlineFields"><label v-for="character in project.characters" :key="character.id" class="checkLabel"><input v-model="originalCharacterIds" type="checkbox" :value="character.id" />{{ character.name }}</label></div></details><button class="primaryButton" :disabled="!originalDirection.trim() || (originalCastMode === 'fixed' && !originalCharacterIds.length)" @click="run('创建原创选题', () => startOriginal(originalDirection, originalCastMode === 'fixed', originalCastMode === 'fixed' ? originalCharacterIds : undefined))">{{ originalCastMode === 'fixed' ? '使用所选角色开始创作' : '先写故事，建立角色' }}</button></div>
               <seriesDesk v-if="ideaMode === 'serial'" :project="project" :disabled="!!busy || saving" @save="run('保存连载设定', save)" @select="(id) => run('切换连载作品', async () => { project!.activeEpisodeId = id; await save(); })" @next="(direction) => run('创建下一集', () => startNextEpisode(direction))" />
               <div v-if="ideaMode === 'research'" class="researchBack"><button class="textButton" @click="ideaMode = 'hot'">← 返回灵感列表</button><span>补充素材后，再开始创作</span></div>
-              <researchDesk v-if="ideaMode === 'research'" v-model:keyword="researchKeyword" :project="project" :disabled="!!busy || saving" :status="researchStatus" @collect="(keyword, platforms) => run('多平台收集专题素材', () => collectResearch(keyword, platforms))" @save="run('保存研究笔记', save)" @use="(id) => run('采用专题素材包', () => useResearchPack(id))" @detail="(packId, topicId) => run('读取笔记正文', () => readResearchSource(packId, topicId))" />
+
 
               <template v-if="ideaMode === 'hot'">
               <section class="surface discoverySearch" aria-label="搜索灵感">
-                <label for="searchKeyword">想找什么题材？</label><div class="discoverySearchRow"><input id="searchKeyword" v-model="searchKeyword" maxlength="80" placeholder="职场反串、情侣嘴硬、生活冷知识……" @keydown.enter.prevent="searchInspirations" /><button class="primaryButton" @click="searchInspirations">{{ searchKeyword.trim() && searchAcross ? '跨平台找灵感' : '发现剧情灵感' }} <icon-arrow-right :size="15" /></button></div>
-                <div class="suggestedKeywords"><span>试试</span><button v-for="keyword in ['职场反串', '情侣嘴硬', 'MBTI趣谈', '生活冷知识']" :key="keyword" @click="searchKeyword = keyword">{{ keyword }}</button></div>
-                <details class="discoveryOptions"><summary>搜索范围与来源 · {{ searchAcross && searchKeyword.trim() ? '多平台' : '单个平台' }}</summary><div class="inlineFields"><label><input v-model="searchAcross" type="checkbox" />有关键词时跨平台搜索</label><label for="sourceSelect">单平台 / 热榜</label><select id="sourceSelect" v-model="source"><option value="bilibili">B站</option><option value="douyin">抖音</option><option value="xhsLocal">小红书 · 需登录</option><option value="tieba">弱智吧</option><option value="douban">豆瓣</option><option value="ithome">IT之家</option><option value="solidot">Solidot</option></select><button class="textButton" @click="connectionsVisible = true">平台连接与登录</button><button class="textButton" @click="source === 'xhsLocal' && !xhsConnected ? connectionsVisible = true : run('获取热点关键词', refreshTopics)">只收集原始关键词</button></div><p class="helperText">没有关键词时读取所选平台热点。整理改编方向会调用文本模型。</p></details>
-                <div class="discoveryUtilities"><button class="textButton" @click="topicVisible = true">＋ 添加自己的来源</button><button class="textButton" @click="researchTopic(searchKeyword)">素材包 / 深入查找</button></div><p v-if="sourceMessage || researchStatus" class="searchStatus" role="status">{{ sourceMessage }} {{ researchStatus }}</p>
+                <div class="discoveryModeSwitch" role="group" aria-label="查找方式"><button :aria-pressed="discoverySearchMode === 'keyword'" @click="discoverySearchMode = 'keyword'">多平台搜索</button><button :aria-pressed="discoverySearchMode === 'trending'" @click="discoverySearchMode = 'trending'">平台热榜</button></div>
+                <template v-if="discoverySearchMode === 'keyword'"><label for="searchKeyword">一个关键词，查找多个平台的相关素材</label><div class="discoverySearchRow"><input id="searchKeyword" v-model="searchKeyword" maxlength="80" placeholder="职场反串、情侣嘴硬、生活冷知识……" @keydown.enter.prevent="searchInspirations" /><button class="primaryButton" :disabled="!searchKeyword.trim() || !discoveryPlatforms.length" @click="searchInspirations">搜索 {{ discoveryPlatforms.length }} 个平台</button></div><div class="platformPicks"><label v-for="item in discoverySources" :key="item.id" :class="{ picked: discoveryPlatforms.includes(item.id) }"><input v-model="discoveryPlatforms" type="checkbox" :value="item.id" />{{ item.label }}</label></div><p class="helperText">按勾选平台搜索同一主题。抖音、小红书、B站可使用本人登录会话；受限平台会单独说明，不影响其他结果。</p><div class="suggestedKeywords"><span>试试</span><button v-for="keyword in ['职场反串', '情侣嘴硬', 'MBTI趣谈', '生活冷知识']" :key="keyword" @click="searchKeyword = keyword">{{ keyword }}</button></div></template>
+                <template v-else><label for="sourceSelect">浏览一个平台的公开热榜</label><div class="discoverySearchRow"><select id="sourceSelect" v-model="source"><option value="douyin">抖音</option><option value="bilibili">B站</option><option value="xhsLocal">小红书 · 本人登录发现</option><option value="tieba">弱智吧</option><option value="douban">豆瓣</option><option value="ithome">IT之家</option><option value="solidot">Solidot</option></select><button class="primaryButton" @click="searchInspirations">读取当前平台</button></div><p class="helperText">此模式只读取上方选中的平台，不使用搜索关键词。小红书需本人登录，其余来源可能受公开访问限制。</p></template>
+                <div class="discoveryUtilities"><button class="textButton" @click="connectionsVisible = true">账号连接与状态</button><button class="textButton" @click="topicVisible = true">＋ 添加自己的来源</button><button v-if="project.researchPacks.length" class="textButton" @click="researchExpanded = !researchExpanded">{{ researchExpanded ? '收起' : '查看' }}素材与研究笔记</button></div><p v-if="sourceMessage || researchStatus" class="searchStatus" role="status">{{ sourceMessage }} {{ researchStatus }}</p>
               </section>
+              <section v-if="project.topics.length" class="surface adaptationBar"><div><h3>把素材整理成创作方向</h3><p class="helperText">搜索只采集真实线索。下面的操作才调用文本模型，生成原创提案。</p></div><label>内容方向<select v-model="discoveryMode"><option value="satire">喜剧</option><option value="science">科普</option><option value="drama">情感剧情</option></select></label><label>内容语气<select v-model="discoveryTone"><option value="">自然表达</option><option v-for="tone in ['反串', '冷幽默', '毒舌', '温柔治愈', '轻松讲解']" :key="tone">{{ tone }}</option></select></label><button class="primaryButton" @click="run('整理原创提案', () => discoverMemes(true))">生成创作提案</button></section>
+              <researchDesk v-if="researchExpanded" :embedded="true" v-model:keyword="researchKeyword" :project="project" :disabled="!!busy || saving" :status="researchStatus" @collect="(keyword, platforms) => run('多平台收集专题素材', () => collectResearch(keyword, platforms))" @save="run('保存研究笔记', save)" @use="(id) => run('采用专题素材包', () => useResearchPack(id))" @detail="(packId, topicId) => run('读取笔记正文', () => readResearchSource(packId, topicId))" />
               <div v-if="!project.memeIdeas.length && !project.topics.length" class="discoveryEmpty"><h3>先找一个你想讲的主题</h3><p>搜索后在这里挑选改编方向，也可以直接带入自己的故事。</p></div>
               <section v-if="project.memeIdeas.length" class="inspirationResults">
                 <div class="sectionTitle">
@@ -158,13 +142,13 @@
                   <span>按改编潜力推荐</span>
                 </div>
                 <p class="helperText">
-                  以下开场、冲突和反转均为原创改编提案。来源通常只有热搜标题，原梗玩法需另行核对；热度是平台原值，与改编潜力分开判断。
+                  以下情境、展开和落点均为 AI 原创改编提案。来源通常只有热搜标题，原梗玩法需另行核对；热度是平台原值，与改编潜力分开判断。
                 </p>
                 <div class="topicGrid">
                   <article v-for="idea in project.memeIdeas" :key="idea.topicId" class="topicCard">
                     <span class="sourceTag">{{ idea.theme }}</span>
                     <h2>{{ idea.hook }}</h2>
-                    <p>{{ idea.conflict }}</p><details class="ideaDetails"><summary>展开剧情与核对信息</summary><p><strong>开场：</strong>{{ idea.setup }}</p><p><strong>反转：</strong>{{ idea.twist }}</p><p class="helperText">待核对：{{ idea.verification }}</p></details>
+                    <p>{{ idea.conflict }}</p><details class="ideaDetails"><summary>展开剧情与核对信息</summary><p><strong>情境 / 问题：</strong>{{ idea.setup }}</p><p><strong>落点 / 变化：</strong>{{ idea.twist }}</p><p class="helperText">待核对：{{ idea.verification }}</p></details>
                     <div v-if="project.topics.find((topic) => topic.id === idea.topicId)" class="cardMeta">
                       <span>{{ project.topics.find((topic) => topic.id === idea.topicId)?.title }}</span>
                       <span>{{ project.topics.find((topic) => topic.id === idea.topicId)?.metric }}</span>
@@ -275,7 +259,7 @@
                 <div v-if="!episode.panels.length" class="boardEmpty"><h3>先建立第一个画面</h3><p>可以手动编排，也可以返回脚本由 AI 拆分。</p><button class="primaryButton" @click="addStoryboardPanel">新增第一格</button></div>
               <div class="storyboardList">
                 <article v-for="(panel, index) in episode.panels" :key="panel.id" v-show="storyboardPanelId === panel.id" class="storyboardRow">
-                  <div class="frameIndex">
+                  <div class="frameIndex"><button class="textButton" @click="removeStoryboardPanel(panel)">移除</button>
                     <strong>{{ String(index + 1).padStart(2, "0") }}</strong>
                     <div>
                       <button :disabled="index === 0" :aria-label="`上移第 ${index + 1} 格`" @click="movePanel(index, -1)">
@@ -335,7 +319,7 @@
               <details v-if="artTab === 'characters' && storySpeakers.length" class="surface"><summary>管理公共角色库 · 新建、编辑与复用</summary><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></details>
               <template v-else><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></template>
               <p v-if="episode?.styleSnapshot" class="helperText">本篇画风：{{ episode.styleSnapshot.name }}。换画风用于后续生成，已有图片需重新绘制。{{ episode.panels.some((panel) => panel.imagePromptOverride) ? '注意：部分分格使用自定义提示词，会覆盖自动整理的画风描述，请在分格出图中检查。' : '' }}</p>
-              <details class="surface modelDisclosure"><summary>出图与图片分析设置 · {{ imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择服务' }}</summary><h2>本次设计使用的模型</h2><label for="referenceAnalysisMode">图片分析服务</label><select id="referenceAnalysisMode" v-model="referenceAnalysisMode"><option value="selected">{{ textServiceLabel }} · 须支持图片输入</option><option value="codex">Codex · 需已安装并登录，单独用于识图</option></select><p class="helperText">{{ referenceAnalysisMode === 'codex' ? '分析通过 Codex CLI 联网，使用当前账号额度；不会改变编剧模型。' : `当前：${textMode === 'codex' ? 'Codex CLI' : textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || '尚未配置文本模型'}。纯文本模型不能分析图片，可改选 Codex 或更换支持识图的文本模型。` }}</p><label for="designImageModel">设计出图服务 · 角色与画风共用</label><select id="designImageModel" v-model="imageModel"><option value="">请选择已配置的生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="model.providerId + model.modelId" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select><template v-if="imageModel === 'zImage/turbo4bit'"><label for="designQuality">本地设计画质</label><select id="designQuality" v-model="zImageQuality"><option value="draft">草稿 · 384×512，仅验证通路</option><option value="standard">标准 · 768×1024</option><option value="detail">细节 · 896×1152，较慢</option></select><p class="helperText">普通图生图无法锁定身份。复杂角色建议先做单人立绘；严格保持多角色需要配置含身份参考约束的 ComfyUI 工作流或支持角色参考的 API，单纯增加提示词不能保证。</p></template><div class="panelActions"><button class="secondaryButton" @click="openSettings('mediaModel')">添加在线图片 API / ComfyUI</button><button class="secondaryButton" @click="openSettings('comicLocal')">检测本地模型</button></div><p class="helperText">分析和出图是两次独立操作，点击才调用。图像分析结果先确认和修改，再生成角色或画风样张。</p></details>
+              <div class="surface modelDisclosure"><strong>设计出图：{{ imageModels.find(item => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择' }}</strong><p>图片分析：{{ referenceAnalysisMode === 'codex' ? 'Codex CLI' : referenceAnalysisMode === 'api' ? textModels.find(item => `${item.providerId}/${item.modelId}` === referenceModel)?.label || '未选择' : textServiceLabel }}</p><button class="secondaryButton" @click="openSettings()">更换模型 / 配置服务</button><p class="helperText">参考图会传给支持图片输入的服务；人物一致性仍取决于所选模型和工作流，不保证自动锁定。</p></div>
             </section>
 
             <section v-else-if="stage === 4 && episode">
@@ -361,12 +345,12 @@
                 </button>
               </div>
               </details>
-              <directPageEditor v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" :generationIssue="productionIssue" @generateAll="run('连续生成漫画页', generateDirectPages)" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
+              <directPageEditor :beforeRemove="backupEpisode" v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" :generationIssue="productionIssue" @generateAll="run('连续生成漫画页', generateDirectPages)" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
               <template v-else>
               <div class="productionSteps"><strong>1 绘制画面 · {{ episode.panels.filter(panel => panel.image).length }}/{{ episode.panels.length }}</strong><button class="textButton" @click="letteringPanel = drawingPanel; stage = 5">2 拼页与气泡 →</button><span>每次绘制一格无字画面，台词在下一步排版。</span></div>
               <div v-if="!episode.panels.length" class="surface productionEmpty"><h3>还没有可绘制的画格</h3><p>先完成故事和分镜，再回来生成画面。</p><button class="primaryButton" @click="stage = 2">前往分镜设计</button></div>
               <div v-else class="panelWorkspace">
-              <div class="letteringTabs drawingTabs" aria-label="选择要绘制的画面"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: drawingPanel === index }" :aria-pressed="drawingPanel === index" @click="drawingPanel = index"><img v-if="panel.image" :src="imageUrls[panel.image]" alt="" /><span>第 {{ index + 1 }} 格 · {{ panel.image ? '已有图' : '待生成' }}</span></button></div>
+              <button class="productionListToggle" :aria-expanded="showProductionPages" @click="showProductionPages = !showProductionPages">画格列表 · {{ episode.panels.length }} 格 {{ showProductionPages ? "收起" : "展开" }}</button><div :class="{ collapsed: !showProductionPages }" class="letteringTabs drawingTabs" aria-label="选择要绘制的画面"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: drawingPanel === index }" :aria-pressed="drawingPanel === index" @click="drawingPanel = index"><img v-if="panel.image" :src="imageUrls[panel.image]" alt="" /><span>第 {{ index + 1 }} 格 · {{ panel.image ? '已有图' : '待生成' }}</span></button></div>
               <div class="imageGrid singlePanelGrid">
                 <article v-for="(panel, index) in episode.panels" v-show="drawingPanel === index" :key="panel.id" class="imageCard">
                   <div class="panelArt">
@@ -375,7 +359,7 @@
                       <icon-photo :size="32" />
                       等待第 {{ index + 1 }} 格出图
                     </span>
-                    <span class="artIndex">{{ String(index + 1).padStart(2, "0") }}</span>
+                    <button class="secondaryButton" @click="removeStoryboardPanel(panel)">移除此格</button><span class="artIndex">{{ String(index + 1).padStart(2, "0") }}</span>
                     <div v-if="generationProgress.active && generationProgress.panelId === panel.id" class="panelGeneration"><strong>{{ generationProgress.phase }}</strong><progress :aria-label="`第${index + 1}格生成中`"></progress><span>{{ generationProgress.elapsedSeconds }} 秒 · 旧图已保留</span></div>
                   </div>
                   <div class="imageCardBody">
@@ -428,95 +412,9 @@
               </template>
             </section>
 
-            <section v-else-if="stage === 5 && episode" class="layoutStage">
-              <header class="productionHeader"><div><h2>{{ episode.title }}</h2><p>分格制作 · 拼页与气泡</p></div><button class="secondaryButton" @click="stage = 6">预览与导出 →</button></header>
-              <div class="productionSteps"><button class="textButton" @click="drawingPanel = letteringPanel; stage = 4">← 1 绘制画面</button><strong>2 拼页与气泡</strong><span>选画格，再点击画面上的气泡编辑。</span></div>
-              <details class="surface layoutControls"><summary>页面设置 · {{ episode.layout.perPage }} 格 / 页 · 字体、排版与底色</summary>
-                <div class="layoutControlGrid">
-                  <div><label for="perPage">每页格数</label><select id="perPage" v-model="episode.layout.perPage"><option :value="1">1 格 / 页</option><option :value="2">2 格 / 页</option><option :value="4">4 格 / 页</option></select></div>
-                  <div><label for="pageArrangement">拼页方式</label><select id="pageArrangement" :value="episode.layout.arrangement || 'grid'" @change="episode.layout.arrangement = ($event.target as HTMLSelectElement).value as 'grid' | 'vertical' | 'horizontal'"><option value="grid">标准分格</option><option value="vertical">上下排列</option><option value="horizontal">左右排列</option></select></div><div><label for="pageGutter">画格间距 {{ episode.layout.gutter ?? 24 }} px</label><input id="pageGutter" :value="episode.layout.gutter ?? 24" @input="episode.layout.gutter = Number(($event.target as HTMLInputElement).value)" type="range" min="8" max="60" /></div>
-                  <div><label for="comicFont">成品字体</label><select id="comicFont" v-model="episode.layout.fontFamily"><option value="sans">清晰黑体 · 系统</option><option value="wenkai">霞鹜文楷 · 内置</option><option value="serif">中文宋体 · 系统</option><option value="genkiGothic">源起黑体 · 内置</option><option value="huninn">粉圆 · 内置</option><option value="genkiMin">源起明体 · 内置</option></select></div>
-                  <div><label for="textMode">文字位置</label><select id="textMode" v-model="episode.layout.textMode"><option value="overlay">漫画气泡 · 拖动定位</option><option value="safe">画外留白 · 不遮人物</option></select></div>
-                </div><details><summary>页面细节 · 字号、底色与质感</summary><div class="layoutControlGrid">                  <div><label for="fontSize">文字字号：{{ episode.layout.fontSize }} px</label><input id="fontSize" v-model.number="episode.layout.fontSize" type="range" min="20" max="60" /></div>
-                  <div><label for="pageBackground">页面底色</label><input id="pageBackground" v-model="episode.layout.background" type="color" /></div>
-                  <div class="flavorToggle"><label for="comicFlavor"><input id="comicFlavor" v-model="episode.layout.comicFlavor" type="checkbox" /> 漫画质感 · 网点、拟声词、页码</label></div></div></details>
-                <p class="helperText">输出 1080 × 1440 PNG。文字独立排版，修改对白无需重新出图。</p>
-                <button class="primaryButton" @click="run('生成排版预览', preview)">
-                  <icon-layout :size="16" />
-                  刷新排版预览
-                </button>
-              </details>
-              <div class="layoutWorkspace">
-                <div class="letteringTabs" aria-label="选择要排字的分格"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: letteringPanel === index }" @click="letteringPanel = index">第 {{ index + 1 }} 格</button></div>
-                <div class="letteringRows">
-                  <article v-for="(panel, index) in episode.panels" v-show="letteringPanel === index" :key="panel.id" class="surface">
-                    <h3>第 {{ index + 1 }} 格 · 文字与位置</h3><details><summary>画格顺序、旁白与音效</summary><div class="panelActions"><button class="secondaryButton" :disabled="index === 0" @click="movePanel(index, -1); letteringPanel = index - 1">前移一格</button><button class="secondaryButton" :disabled="index === episode.panels.length - 1" @click="movePanel(index, 1); letteringPanel = index + 1">后移一格</button></div>
-                    <label :for="`letterCaption${index}`">画外旁白</label><textarea :id="`letterCaption${index}`" v-model="panel.caption" rows="2" maxlength="300" /><label :for="`letterSfx${index}`">音效字</label><input :id="`letterSfx${index}`" v-model="panel.sfx" maxlength="40" /></details>
-                    <letteringEditor :panel="panel" :cast="episode.castSnapshot" :imageUrl="imageUrls[panel.image]" :textMode="episode.layout.textMode" :fontFamily="episode.layout.fontFamily" />
-                  </article>
-                </div>
-                <details class="pagePreviewColumn"><summary>查看拼页成品预览</summary><p class="helperText">完整分格与字体已合成，点击图片查看大图。</p><p v-if="previewMessage" class="previewWarning" role="alert">{{ previewMessage }}</p><p v-else-if="!previewUrls.length" class="helperText">缺图以占位图显示，修改字号、气泡和排版会实时刷新。</p><div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页排版预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div></details>
-              </div>
-            </section>
+            <compositionWorkspace v-model:panelIndex="letteringPanel" v-else-if="stage === 5 && episode" :key="episode.id" :episode="episode" :files="files" :previewUrls="previewUrls" @draw="stage = 4" @preview="stage = 6" @remove="removeStoryboardPanel" />
 
-            <section v-else-if="stage === 6 && episode">
-              <div class="surface"><h2>整体效果预览</h2><p>检查角色、对白与排版；需要时返回微调，无需逐格审批。导出的是当前采用的图片。</p><div class="panelActions"><button class="secondaryButton" @click="run('刷新预览', preview)">刷新预览</button><button class="secondaryButton" @click="stage = 4">修改画面</button><button class="secondaryButton" @click="stage = episode.productionMode === 'direct' ? 4 : 5">{{ episode.productionMode === 'direct' ? '修改台词并重绘' : '调整气泡与文字' }}</button><button class="primaryButton" :disabled="!productionReady(episode)" @click="run('导出图片', exportImages)">导出成品图片</button></div><p v-if="episode.productionMode === 'panels' && episode.panels.some((panel) => !panel.image)" class="helperText">还有 {{ episode.panels.filter((panel) => !panel.image).length }} 格未配图，预览中以占位图显示，字幕正常合成；补齐后即可导出。</p><p v-if="previewMessage" role="status">{{ previewMessage }}</p></div>
-
-              <div class="pagePreviews"><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`第 ${index + 1} 页成品预览`" tabindex="0" role="button" @click="largePreviewVisible = true" @keydown.enter="largePreviewVisible = true" /></div>
-            </section>
-
-            <section v-else-if="stage === 7 && episode" class="splitColumns">
-              <div class="surface">
-                <h2>发布文案</h2>
-                <div class="postToolbar"><label for="postStyle">文案风格</label><select id="postStyle" v-model="episode.postStyle"><option v-for="tone in ['简单有梗', 'emo', '误会有梗', '温柔治愈', '轻松科普']" :key="tone" :value="tone">{{ tone }}</option></select><button class="secondaryButton" @click="run('生成发布文案候选', generatePost)">生成文案候选</button></div>
-                <p class="helperText">使用当前文本模型，点击才调用；候选不会覆盖正文，采用后仍可编辑。</p>
-                <div v-if="episode.postCandidate" class="postCandidate"><label for="postCandidate">生成候选 · 可先修改</label><textarea id="postCandidate" v-model="episode.postCandidate" rows="7" maxlength="1200"></textarea><div class="panelActions"><button class="primaryButton" @click="run('采用发布文案', async () => { episode!.postText = episode!.postCandidate; episode!.postCandidate = ''; await save(); })">采用候选</button><button class="secondaryButton" @click="run('放弃文案候选', async () => { episode!.postCandidate = ''; await save(); })">放弃候选</button></div></div>
-                <label for="postText">标题、正文与话题标签</label>
-                <textarea id="postText" v-model="episode.postText" rows="13"></textarea>
-                <details class="postReview"><summary>发布前自审 · 生成说明与参考来源</summary><p>这些记录默认不加入发布正文；需要时自行勾选。平台要求的 AI 标识请在发布时核对。</p><p>创作说明：本作品为原创虚构漫画，AI辅助情况请结合素材档案审核。</p><p>参考来源：{{ episode.topic.url || episode.topic.source }}{{ episode.researchPackId ? '；另有专题素材包，见创作档案。' : '' }}</p><label><input v-model="episode.includeAiDisclosure" type="checkbox" />正文加入 AI 辅助说明</label><label><input v-model="episode.includeReferences" type="checkbox" />正文加入参考来源</label></details>
-                <details v-if="episode.includeAiDisclosure || episode.includeReferences" class="postReview"><summary>查看最终导出文案</summary><pre>{{ publicationText(episode) }}</pre></details>
-                <label for="publishedUrl">发布后记录作品链接</label>
-                <input id="publishedUrl" v-model="episode.publishedUrl" type="url" />
-                <div class="panelActions">
-                  <a class="secondaryButton" href="https://creator.xiaohongshu.com/" target="_blank" rel="noopener noreferrer">
-                    打开小红书创作中心
-                    <icon-external-link :size="15" />
-                  </a>
-                  <button class="secondaryButton" @click="run('保存发布记录', save)">保存发布记录</button>
-                </div>
-              </div>
-              <div class="surface exportCard">
-                <span class="exportIcon"><icon-package-export :size="36" /></span>
-                <h2>导出发布包</h2>
-                <p>
-                  PNG 成品页 · 发布文案 · 来源记录
-                  <br />
-                  本期脚本、角色与风格快照
-                </p>
-                <dl>
-                  <div>
-                    <dt>画面尺寸</dt>
-                    <dd>1080 × 1440</dd>
-                  </div>
-                  <div>
-                    <dt>图片完成</dt>
-                    <dd>{{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).filter((panel) => panel.image).length }} / {{ (episode.productionMode === 'direct' ? episode.directPages : episode.panels).length }} {{ episode.productionMode === 'direct' ? '页' : '格' }}</dd>
-                  </div>
-                  <div>
-                    <dt>美术版本</dt>
-                    <dd>{{ episode.styleSnapshot?.name || "尚未绑定" }}</dd>
-                  </div>
-                </dl>
-                <button
-                  class="primaryButton"
-                  :disabled="!productionReady(episode)"
-                  @click="run('排版并导出发布包', exportPackage)">
-                  <icon-download :size="17" />
-                  导出 ZIP 发布包
-                </button>
-                <p class="helperText">素材包会下载并保存在项目目录。请在平台完成发布与 AI 内容声明；软件不会自动发帖。</p>
-              </div>
-            </section>
+            <publicationWorkspace v-else-if="(stage === 6 || stage === 7) && episode" :key="episode.id" :episode="episode" :previewUrls="previewUrls" :previewMessage="previewMessage" @edit="stage = episode.productionMode === 'direct' ? 4 : 5" @refresh="run('刷新预览', preview)" @full="largePreviewVisible = true" @images="run('导出成品图片', exportImages)" @package="run('导出发布包', exportPackage)" @generatePost="run('生成发布文案候选', generatePost)" @save="run('保存发布记录', save)" />
 
             <section v-else class="stageNotice">
               <icon-file-description :size="32" />
@@ -526,17 +424,7 @@
             </section>
           </fieldset>
 
-          <footer v-if="![0, 1, 2, 3, 4, 5].includes(stage)" class="stageFooter">
-            <button class="textButton" :disabled="stage === 0 || !!busy" @click="stage = adjacentStage(-1)">
-              <icon-arrow-left :size="16" />
-              上一步
-            </button>
-            <span>{{ workflowOrder.indexOf(stage === 5 ? 4 : stage) + 1 }} / {{ stages.length - 1 }}</span>
-            <button class="primaryButton" :disabled="stage === stages.length - 1 || !!busy || !episode" @click="stage = adjacentStage(1)">
-              {{ !episode ? (ideaMode === 'ownStory' ? '先保存自己的剧情' : '从剧情、原创灵感或热点开始') : stage === stages.length - 1 ? '已到最后一步' : `继续：${stages[adjacentStage(1)]!.title}` }}
-              <icon-arrow-right :size="16" />
-            </button>
-          </footer>
+
         </template>
       </main>
     </div>
@@ -569,7 +457,7 @@
     <el-dialog v-model="comparisonVisible" class="platformDialog" title="重画对比 · 两版都会保留" width="min(1000px, 94vw)" alignCenter><template v-if="comparisonPanel"><p>检查动作由谁执行、角色数量、服装与道具。采用版本后需重新审稿；这里不会再次调用模型。</p><div class="imageComparison"><figure v-for="side in ['left', 'right'] as const" :key="side"><label :for="`comparison${side}`">{{ side === 'left' ? '左侧版本' : '右侧版本' }}</label><select :id="`comparison${side}`" :value="side === 'left' ? comparisonLeft : comparisonRight" @change="side === 'left' ? comparisonLeft = ($event.target as HTMLSelectElement).value : comparisonRight = ($event.target as HTMLSelectElement).value"><option v-for="(path, version) in comparisonPanel.history" :key="path" :value="path">版本 {{ version + 1 }}{{ comparisonPanel.image === path ? ' · 当前采用' : comparisonPanel.candidate?.path === path ? ' · 新版候选' : '' }}</option></select><img :src="imageUrls[side === 'left' ? comparisonLeft : comparisonRight]" :alt="side === 'left' ? '左侧漫画版本' : '右侧漫画版本'" /><button :disabled="!!busy || saving" class="primaryButton" @click="run('选择漫画版本', () => useComparedVersion(side === 'left' ? comparisonLeft : comparisonRight))">采用{{ side === 'left' ? '左侧' : '右侧' }}版本</button></figure></div><button v-if="comparisonPanel.candidate" :disabled="!!busy || saving" class="secondaryButton" @click="run('保留旧版', async () => { await resolveCandidate(comparisonPanel!, false); comparisonVisible = false; })">保留当前旧版</button></template></el-dialog>
     <settings v-model="settingsVisible" v-model:panel="settingsPanel" :comicStudio="true">
       <template #comicOverview><settingsOverview :textMode="textMode" :textLabel="textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || ''" :imageLabel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || ''" :codexModel="codexModel" :automatic="collectionSettings.automatic" :intervalMinutes="collectionSettings.intervalMinutes" @navigate="settingsPanel = $event" /></template>
-      <template #comicDefaults><div class="comicSettings"><div class="settingsLead"><h3>为漫画任务分配模型</h3><p>先在「文本模型 / 生图模型」配置供应商，再在这里选择默认服务。文本与生图互不覆盖；更改自动保存。</p></div><div class="settingColumns"><section class="settingCard"><h3>文本任务</h3><p>选梗、故事脚本、分镜结构、反馈复盘。</p><label for="studioTextMode">运行方式</label><select id="studioTextMode" v-model="textMode" :disabled="modelChecking"><option value="codex">本机 Codex CLI</option><option value="api">云端 / 本地文本 API</option></select><template v-if="textMode === 'codex'"><label for="studioCodexModel">Codex 模型 ID</label><input id="studioCodexModel" v-model="codexModel" :disabled="modelChecking" maxlength="101" /><label for="textEffort">编剧推理强度</label><select id="textEffort" v-model="textEffort"><option value="low">快速</option><option value="medium">均衡</option><option value="high">细致</option><option value="xhigh">深入 · 耗时较长</option></select><p>在本机启动 Codex CLI，通过网络调用模型，并非离线模型。复用 CLI 登录，不修改全局配置。</p></template><template v-else><label for="defaultTextModel">默认文本模型</label><select id="defaultTextModel" v-model="textModel" :disabled="modelChecking"><option value="">请先添加文本模型</option><option v-for="model in textModels" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`">{{ model.label }}</option></select></template><button :disabled="modelChecking || (textMode === 'api' && !textModel)" @click="probeTextModel">{{ modelChecking ? '正在真实调用…' : '测试文本生成' }}</button><p class="modelProbeResult" role="status">{{ modelProbeMessage || '检测会发起一次简短请求，可能产生少量模型费用。' }}</p><button @click="openSettings('languageModel')">管理文本模型</button><button @click="openSettings('comicLocal')">连接本地文本服务</button></section><section class="settingCard"><h3>生图任务</h3><p>角色设定、画风样张、连续分格出图。</p><label for="studioImageModel">默认生图模型</label><select id="studioImageModel" v-model="imageModel"><option value="">尚未选择生图服务</option><option v-for="model in imageModels.filter((item) => item.configured || `${item.providerId}/${item.modelId}` === imageModel)" :key="`${model.providerId}/${model.modelId}`" :value="`${model.providerId}/${model.modelId}`" :disabled="!model.configured">{{ model.label }}</option></select><p>{{ imageModel === 'fluxKlein/klein4bit' ? '本机多参考编辑，4步；每格读取正式角色图，最多4位角色。请先用草稿验证身份与场景，无云端API费用。' : imageModel === 'zImage/turbo4bit' ? '本机 MLX 推理，默认768×1024、9步；在分格出图可选画质。无云端API费用。支持单参考图，不支持多角色锁定。' : imageModel === 'codex/imagegen' ? '通过已登录的 Codex CLI 直接生图，自动保存回作品。需联网并使用当前账号额度，不需要另填图片 API 密钥。' : imageModel ? '模型已选择；请在分格出图点击生成，验证实际效果。' : '可使用已登录且支持生图的 Codex CLI，或添加图片 API、本地 ComfyUI 工作流。' }}</p><button @click="openSettings('mediaModel')">管理生图模型与工作流</button><button @click="openSettings('comicLocal')">检测本地生图服务</button></section></div><section class="settingCard"><h3>界面与阅读</h3><p>主题、强调色和界面字号统一由原有「界面设置」管理。漫画成品的字号与排字仍在制作流程中设置。</p><button @click="openSettings('ui')">打开界面设置</button></section></div></template>
+      <template #comicDefaults><modelTasks v-model:textMode="textMode" v-model:textModel="textModel" v-model:imageModel="imageModel" v-model:referenceAnalysisMode="referenceAnalysisMode" v-model:referenceModel="referenceModel" v-model:codexModel="codexModel" v-model:textEffort="textEffort" :textModels="textModels" :imageModels="imageModels" :modelChecking="modelChecking" :modelProbeMessage="modelProbeMessage" :refreshModels="loadModels" @configure="openSettings" @probe="probeTextModel" /></template>
       <template #comicPlatforms>      <div class="connectionContent">
         <p>按平台连接一次，之后回到选题页使用。你不需要手工查找或粘贴 Cookie。</p>
         <platformAccounts :disabled="!!busy || saving" @collected="(items) => run('收集本人浏览器内容', async () => { if (!project) throw new Error('请先选择创作空间'); const topics = projectSchema.shape.topics.parse(items.map((item) => ({ ...(item as object), id: newTopicId(), verified: false }))); project.topics = [...topics, ...project.topics.filter((old) => !topics.some((item) => old.url === item.url))].slice(0, 1000); await save(); settingsVisible = false; stage = 0; workspaceMode = 'studio'; })" />
@@ -632,14 +520,12 @@ import {
   IconUserSquareRounded,
   IconPackageExport,
   IconPhoto,
-  IconLayout,
-  IconDownload,
   IconFileDescription,
-  IconArrowLeft,
 } from "@tabler/icons-vue";
 import settings from "@/components/settings/index.vue";
 import useStudio from "./useStudio";
-import letteringEditor from "./letteringEditor.vue";
+import publicationWorkspace from "./publicationWorkspace.vue";
+import compositionWorkspace from "./compositionWorkspace.vue";
 import analysisDashboard from "./analysisDashboard.vue";
 import settingsOverview from "./settingsOverview.vue";
 import { uiSettings } from "@/stores/settings";
@@ -648,22 +534,29 @@ import platformAccounts from "./platformAccounts.vue";
 import researchDesk from "./researchDesk.vue";
 import seriesDesk from "./seriesDesk.vue";
 import personalHub from "./personalHub.vue";
+import modelTasks from "./modelTasks.vue";
 import artLibrary from "./artLibrary.vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
-import { imageInput, imagePrompt, identityPanelInput, referenceReady, characterSchema, scriptRoleNames, characterVisual, characterPrompt, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema, publicationText } from "./model";
-import type { Panel, Character, ArtStyle } from "./model";
+import { imageInput, imagePrompt, identityPanelInput, referenceReady, characterSchema, scriptRoleNames, characterVisual, characterPrompt, reviewInput, isApproved, newPanel, safeLink, splitDialogue, projectSchema } from "./model";
+import type { Panel, Character, ArtStyle, Episode } from "./model";
 
 const newTopicId = () => crypto.randomUUID();
 const researchKeyword = ref("");
 const ideaMode = ref("hot");
-const searchAcross = ref(true);
+const discoverySearchMode = ref<"keyword" | "trending">("keyword");
+const researchExpanded = ref(false);
+const discoverySources = [{ id: "douyin", label: "抖音" }, { id: "xhsLocal", label: "小红书" }, { id: "bilibili", label: "B站" }, { id: "tieba", label: "弱智吧" }, { id: "douban", label: "豆瓣" }] as const;
 function searchInspirations() {
   if (busy.value) return;
-  if (searchAcross.value && searchKeyword.value.trim()) return run("跨平台查找灵感", discoverAcrossPlatforms);
+  if (discoverySearchMode.value === "keyword") {
+    if (!searchKeyword.value.trim() || !discoveryPlatforms.value.length) return;
+    researchExpanded.value = true;
+    return run("多平台搜索素材", () => collectResearch(searchKeyword.value, discoveryPlatforms.value));
+  }
   if (source.value === "xhsLocal" && !xhsConnected.value) { connectionsVisible.value = true; return; }
-  return run("收集灵感", () => ["douyin", "bilibili", "xhsLocal"].includes(source.value) ? discoverMemes() : refreshTopics());
+  return run("读取平台热榜", () => refreshTopics(source.value, ""));
 }
-async function researchTopic(keyword: string) { researchKeyword.value = keyword.slice(0, 80); ideaMode.value = "research"; await nextTick(); }
+async function researchTopic(keyword: string) { discoverySearchMode.value = "keyword"; searchKeyword.value = keyword.slice(0, 80); researchKeyword.value = searchKeyword.value; ideaMode.value = "hot"; researchExpanded.value = true; if (searchKeyword.value.trim()) await run("收集专题素材", () => collectResearch(searchKeyword.value, discoveryPlatforms.value)); }
 const route = useRoute();
 const router = useRouter();
 const workspaceMode = computed({ get: () => ["analysis", "archive"].includes(String(route.query.workspace)) ? String(route.query.workspace) : "studio", set: (value: string) => { void router.replace({ query: { ...route.query, workspace: value } }); } });
@@ -728,6 +621,10 @@ const {
   generateCharacter,
   analyzeReferences,
   referenceAnalysisMode,
+  referenceModel,
+  discoveryPlatforms,
+  discoveryMode,
+  discoveryTone,
   exportCharacter,
   textModels,
   imageModels,
@@ -764,7 +661,6 @@ const {
   discoverProjects,
   refreshTopics,
   discoverMemes,
-  discoverAcrossPlatforms,
   selectMeme,
   selectTopic,
   putImage,
@@ -871,13 +767,12 @@ const stages = [
   { title: "分镜设计", icon: IconLayoutBoard, eyebrow: "STORYBOARD", heading: "把故事，一格一格展开。", description: "编排镜头、动作与对白，为每个画面做好准备。" },
   { title: "角色与美术", icon: IconUserSquareRounded, eyebrow: "ART DIRECTION", heading: "每个故事，都有自己的样子。", description: "先选本篇角色与画风，再用图片或一句话创建新资源。" },
   { title: "漫画制作", icon: IconPhoto, eyebrow: "GENERATE", heading: "让分镜，变成看得见的画面。", description: "整页直出或分格制作，在同一空间绘制、排字和比较版本。" },
-  { title: "字幕与排版", icon: IconTypography, eyebrow: "COMPOSE", heading: "让画面和文字，好好说话。", description: "独立编辑对白与旁白，在实际尺寸中调整排版。" },
-  { title: "整体预览", icon: IconChecklist, eyebrow: "REVIEW", heading: "看看完整效果，满意就导出。", description: "预览整体排版，随时返回微调，不需要逐格审批。" },
+  { title: "拼页与气泡", icon: IconTypography, eyebrow: "COMPOSE", heading: "让画面和文字，好好说话。", description: "独立编辑对白与旁白，在实际尺寸中调整排版。" },
+  { title: "预览与导出", icon: IconChecklist, eyebrow: "REVIEW", heading: "看看完整效果，满意就导出。", description: "预览整体排版，随时返回微调，不需要逐格审批。" },
   { title: "导出发布", icon: IconPackageExport, eyebrow: "PUBLISH", heading: "把完成的故事，交给读者。", description: "打包成品、文案与来源，前往平台发布并记录作品。" },
 ];
-const workflowOrder = [0, 1, 3, 2, 4, 6, 7];
+const workflowOrder = [0, 1, 3, 2, 4, 6];
 const workflowStages = computed(() => workflowOrder.map(index => ({ index, item: stages[index]! })));
-function adjacentStage(direction: number) { return workflowOrder[Math.max(0, Math.min(workflowOrder.length - 1, workflowOrder.indexOf(stage.value === 5 ? 4 : stage.value) + direction))]!; }
 const comicProjects = computed(() => workspace.projectList.filter((item) => isComicDirectory(item.directory) || item.directory === directory.value));
 const newProjectVisible = ref(false);
 const newProjectTitle = ref("");
@@ -899,6 +794,7 @@ watch([workspaceMode, () => project.value?.title], maybeCollect);
 onMounted(() => { collectionTimer = setInterval(maybeCollect, 60000); });
 onBeforeUnmount(() => clearInterval(collectionTimer));
 const letteringPanel = ref(0);
+const showProductionPages = ref(true);
 const storyboardPanelId = ref("");
 watch(() => episode.value?.panels.map(panel => panel.id).join(","), () => {
   if (!episode.value?.panels.some(panel => panel.id === storyboardPanelId.value)) storyboardPanelId.value = episode.value?.panels[0]?.id || "";
@@ -988,6 +884,35 @@ function addTopic() {
     Object.assign(topicDraft, { title: "", url: "", summary: "", original: false });
   });
 }
+async function backupEpisode() {
+  if (!episode.value) return;
+  await files.value.writeJson(`compositionBackup${Date.now()}.json`, JSON.parse(JSON.stringify(episode.value)), true);
+}
+const removedPanel = ref<{ episodeId: string; index: number; panel: Panel; pages: Episode["directPages"] }>();
+async function removeStoryboardPanel(panel: Panel) {
+  try { await ElMessageBox.confirm("移除此画格及其整页关联？原图会保留，编排会保存快照，也可立即撤销。", "移除画格", { type: "warning" }); } catch { return; }
+  await run("移除画格并备份", async () => {
+    const current = episode.value;
+    if (!current || !current.panels.includes(panel)) return;
+    await backupEpisode();
+    removedPanel.value = { episodeId: current.id, index: current.panels.indexOf(panel), panel: JSON.parse(JSON.stringify(panel)), pages: JSON.parse(JSON.stringify(current.directPages)) };
+    current.panels.splice(current.panels.indexOf(panel), 1);
+    for (const page of current.directPages) page.panelIds = page.panelIds.filter(id => id !== panel.id);
+    drawingPanel.value = Math.max(0, Math.min(drawingPanel.value, current.panels.length - 1));
+    letteringPanel.value = Math.max(0, Math.min(letteringPanel.value, current.panels.length - 1));
+    await save();
+  });
+}
+async function restoreStoryboardPanel() {
+  await run("恢复画格", async () => {
+    const entry = removedPanel.value, current = episode.value;
+    if (!entry || !current || entry.episodeId !== current.id) return;
+    current.panels.splice(entry.index, 0, entry.panel);
+    for (const page of current.directPages) { const original = entry.pages.find(item => item.id === page.id); const position = original?.panelIds.indexOf(entry.panel.id) ?? -1; if (position >= 0 && !page.panelIds.includes(entry.panel.id)) page.panelIds.splice(position, 0, entry.panel.id); }
+    removedPanel.value = undefined;
+    await save();
+  });
+}
 function movePanel(index: number, offset: number) {
   const panels = episode.value?.panels;
   if (!panels || !panels[index + offset]) return;
@@ -1029,7 +954,7 @@ function activateUpload(event: KeyboardEvent) {
   (event.currentTarget as HTMLElement).querySelector<HTMLInputElement>('input[type="file"]')?.click();
 }
 const textServiceLabel = computed(() => textMode.value === "codex" ? `Codex CLI · ${codexModel.value || "默认模型"}` : textModels.value.find((item) => `${item.providerId}/${item.modelId}` === textModel.value)?.label || textModel.value || "尚未配置文本模型");
-const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : `图片分析：${textServiceLabel.value}`);
+const analysisServiceLabel = computed(() => referenceAnalysisMode.value === "codex" ? `图片分析：Codex CLI · ${codexModel.value}` : referenceAnalysisMode.value === "api" ? `图片分析：${textModels.value.find(item => `${item.providerId}/${item.modelId}` === referenceModel.value)?.label || "未选择"}` : `图片分析：${textServiceLabel.value}`);
 const unboundScriptRoles = computed(() => episode.value?.scriptRoles.filter(role => !episode.value?.castSnapshot.some(person => person.id === episode.value?.roleBindings[role.name])) || []);
 const storySpeakers = computed(() => {
   const current = episode.value;
@@ -1172,6 +1097,10 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.discoveryModeSwitch { display:flex; gap:8px; margin-bottom:18px; button { padding:10px 16px; border:1px solid var(--studioLine); border-radius:8px; background:var(--studioCard); color:var(--studioInk); cursor:pointer; &[aria-pressed="true"] { background:var(--studioAccent); color:white; } } }
+.platformPicks { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 8px; label { display:flex; gap:6px; align-items:center; padding:9px 12px; border:1px solid var(--studioLine); border-radius:7px; margin:0; cursor:pointer; &.picked { background:var(--studioPaper); border-color:var(--studioAccent); } } }
+.adaptationBar { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin:16px 0; >div { flex:1 1 260px; } h3 { margin:0; } label { display:grid; gap:6px; } }
+.discoveryFilters { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 16px 0; label { display: flex; align-items: center; gap: 6px; } }
 .taskWaiting { display: flex; gap: 16px; align-items: center; padding: 16px; margin-bottom: 16px; border: 1px solid #b9cab9; background: #edf4ec; border-radius: 12px; position: sticky; top: 0; z-index: 5; p { margin: 6px 0 0; } progress { width: 100px; flex-shrink: 0; } }
 .boardGenerate { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
 
@@ -1486,45 +1415,7 @@ onMounted(() => {
     margin: auto;
     padding: 22px 32px 24px;
   }
-  .pageHeading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 24px;
-    margin-bottom: 20px;
-    h1 {
-      font-size: clamp(22px, 2vw, 28px);
-      font-weight: 600;
-      letter-spacing: -0.7px;
-      margin: 7px 0 9px;
-    }
-    p {
-      color: var(--studioMuted);
-      font-size: 12px;
-      margin: 0;
-    }
-    .episodeBadge {
-      border-left: 2px solid #b5c9b8;
-      padding-left: 14px;
-      min-width: 160px;
-      max-width: 240px;
-      span,
-      small {
-        display: block;
-        color: var(--studioMuted);
-        font-size: 10px;
-      }
-      strong {
-        display: block;
-        font-size: 12px;
-        font-weight: 600;
-        margin: 4px 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-  }
+
   .eyebrow {
     color: #6f8071;
     font-size: 10px;
@@ -2187,18 +2078,7 @@ onMounted(() => {
       }
     }
   }
-  .stageFooter {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-top: 1px solid var(--studioLine);
-    padding: 22px 0 4px;
-    margin-top: 32px;
-    > span {
-      font-size: 11px;
-      color: var(--studioMuted);
-    }
-  }
+
   .welcomePanel {
     max-width: 920px;
     margin: 80px auto;
@@ -2306,9 +2186,7 @@ onMounted(() => {
     .characterGrid {
       grid-template-columns: 1fr 1fr;
     }
-    .pageHeading .episodeBadge {
-      display: none;
-    }
+
     .bindingBar {
       align-items: flex-start;
       flex-direction: column;
@@ -2404,15 +2282,7 @@ onMounted(() => {
     .studioContent {
       padding: 24px 16px;
     }
-    .pageHeading {
-      margin-bottom: 22px;
-      h1 {
-        font-size: 24px;
-      }
-      p {
-        font-size: 11px;
-      }
-    }
+
     .topicGrid,
     .imageGrid,
     .characterGrid,
@@ -2531,7 +2401,7 @@ onMounted(() => {
   .primaryButton { background: var(--studioAccent); border-color: var(--studioAccent); }
   .presetGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .presetCard { border: 1px solid var(--studioLine); border-radius: 10px; overflow: hidden; background: var(--studioCard); button { display: grid; width: 100%; gap: 7px; padding: 12px; color: var(--studioInk); background: transparent; border: 0; text-align: left; cursor: pointer; svg { width: 100%; height: auto; } strong { font-size: 15px; } small { color: var(--studioMuted); } } a { display: block; font-size: 12px; padding: 0 12px 12px; color: var(--studioAccent); } &:hover, &:focus-within { outline: 2px solid var(--studioAccent); outline-offset: 1px; } }
-  .productionStatus { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; button { border: 1px solid var(--studioLine); border-radius: 18px; background: var(--studioCard); color: var(--studioInk); padding: 7px 12px; min-height: 36px; cursor: pointer; } }
+
   .drawingTabs { margin: 16px 0; button { display: grid; gap: 6px; } img { width: 72px; height: 90px; object-fit: contain; } }
   .singlePanelGrid { grid-template-columns: minmax(0, 1fr); .imageCard { max-width: 900px; } .panelArt { max-height: 620px; } }
   .layoutWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
@@ -2566,7 +2436,7 @@ onMounted(() => {
 }
 .comicStudio .layoutStage { gap: 0; .layoutControls { margin-bottom: 16px; padding: 12px 16px; summary { cursor: pointer; font-size: 13px; } } .layoutWorkspace { grid-template-columns: 112px minmax(0, 1fr); gap: 0; border: 1px solid var(--studioLine); border-radius: 12px; overflow: hidden; background: var(--studioCard); } .letteringTabs { grid-column: auto; display: flex; flex-direction: column; background: #f0f3ed; padding: 10px; margin: 0; button { font-size: 12px; } } .letteringRows .surface { border: 0; padding: 16px; h3 { margin: 0; font-size: 14px; } > details { margin: 10px 0; } } .pagePreviewColumn { grid-column: 2; position: static; padding: 16px; summary { cursor: pointer; } } }
 @media (max-width: 1100px) { .comicStudio .panelWorkspace .singlePanelGrid .imageCard { grid-template-columns: minmax(180px, 1fr) 250px; } }
-@media (max-width: 760px) { .comicStudio .panelWorkspace { grid-template-columns: 1fr; .drawingTabs { flex-direction: row; overflow-x: auto; button { min-width: 80px; } img { height: 60px; } } .singlePanelGrid .imageCard { grid-template-columns: 1fr; } } .comicStudio .layoutStage { .layoutWorkspace { grid-template-columns: 1fr; } .letteringTabs { flex-direction: row; overflow-x: auto; } .pagePreviewColumn { grid-column: 1; } } .productionModes button { padding: 8px 12px; } }
+@media (max-width: 760px) { .comicStudio .panelWorkspace { grid-template-columns: 1fr; .drawingTabs { flex-direction: column; max-height: 260px; overflow-y: auto; button { display: flex; align-items: center; gap: 12px; } img { width: 60px; height: 60px; } } .singlePanelGrid .imageCard { grid-template-columns: 1fr; } } .comicStudio .layoutStage { .layoutWorkspace { grid-template-columns: 1fr; } .letteringTabs { flex-direction: column; max-height: 260px; overflow-y: auto; } .pagePreviewColumn { grid-column: 1; } } .productionModes button { padding: 8px 12px; } }
 @media (min-width: 761px) { .comicStudio .panelWorkspace { height: max(460px, calc(100vh - 375px)); .drawingTabs, .imageCardBody { min-height: 0; overflow-y: auto; overscroll-behavior: contain; } .singlePanelGrid { min-height: 0; .imageCard { height: 100%; min-height: 0; } .panelArt { min-height: 0; overflow: auto; img { max-height: 100%; } } } } }
 
 .productionHeader { margin-bottom: 12px; }
@@ -2612,4 +2482,7 @@ onMounted(() => {
 .castPerson { display:flex; gap:14px; align-items:center; min-width:0; > div { min-width:0; } img, .castPlaceholder { width:76px; height:96px; flex-shrink:0; border-radius:8px; object-fit:contain; background:var(--studioPaper); } .castPlaceholder { display:grid; place-items:center; color:var(--studioMuted); font-size:12px; } p { margin:6px 0; overflow-wrap:anywhere; } }
 .roleTweaks { grid-column:3; summary { cursor:pointer; color:var(--studioMuted); font-size:12px; } label { display:grid; gap:6px; margin-top:12px; } }
 @media(max-width:760px) { .roleCasting header { align-items:flex-start; flex-direction:column; } .roleCastingRow { grid-template-columns:minmax(0,1fr); gap:12px; } .castingArrow { display:none; } .roleTweaks { grid-column:1; } }
+.productionListToggle { display: none; }
+.comicStudio .layoutStage .letteringTabs { max-height: 65vh; overflow-y: auto; flex-wrap: nowrap; button { flex-shrink: 0; } }
+@media (max-width: 760px) { .productionListToggle { display: block; padding: 12px; } .comicStudio .panelWorkspace .drawingTabs.collapsed, .comicStudio .layoutStage .letteringTabs.collapsed { display: none; } }
 </style>

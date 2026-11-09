@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="provider ? '编辑供应商' : '添加自定义供应商'"
+    :title="provider ? '编辑模型服务' : '添加文本 / 图片分析服务'"
     width="min(760px, 94vw)"
     alignCenter
     appendToBody
@@ -10,10 +10,11 @@
     :closeOnPressEscape="!saving"
     :showClose="!saving"
     @closed="resetForm">
-    <el-scrollbar maxHeight="65vh">
+    <el-scrollbar maxHeight="65vh"><p v-if="comicStudio" class="serviceNotice">先连接服务，再选模型。图片分析与生图使用不同接口，可在任务配置中分别选择。</p>
       <el-form ref="providerForm" :model="form" :rules="rules" labelPosition="top" :disabled="saving" class="customProviderForm">
+        <div v-if="comicStudio && !provider" class="servicePresets"><label>选择服务类型</label><el-select v-model="selectedPreset" aria-label="服务类型" @change="applyPreset"><el-option v-for="preset in servicePresets" :key="preset.id" :label="preset.label" :value="preset.id" /></el-select><p>预填常用地址后仍可修改。填写密钥，读取模型列表，或按供应商说明手动添加模型 ID；支持识图与否取决于具体模型。</p></div>
         <div class="formGrid">
-          <el-form-item label="Provider ID" prop="id"><el-input v-model="form.id" placeholder="例如 myProvider" /></el-form-item>
+          <el-form-item v-if="!comicStudio" label="Provider ID" prop="id"><el-input v-model="form.id" placeholder="例如 myProvider" /></el-form-item>
           <el-form-item label="显示名称" prop="label"><el-input v-model="form.label" placeholder="供应商的显示名称" /></el-form-item>
           <el-form-item label="API 地址" prop="apiUrl"><el-input v-model="form.apiUrl" dir="ltr" placeholder="https://api.example.com/v1" /></el-form-item>
           <el-form-item label="API 协议" prop="protocol">
@@ -159,7 +160,20 @@ import { saveSettings, type CustomProvider, type CustomProviderModel } from "@/s
 import { isTfRouterProvider } from "@/lib/tf";
 import { thinkingLevels, type ThinkingLevel, type ReasoningEfforts } from "@toonflow/server/modelReasoning";
 
-const props = defineProps<{ provider?: CustomProvider }>();
+const props = defineProps<{ provider?: CustomProvider; comicStudio?: boolean }>();
+const selectedPreset = ref("custom");
+const servicePresets = [
+  {id:"custom",label:"其他供应商 / 自定义兼容 API",url:"",protocol:"openai-completions"},
+  {id:"deepseek",label:"DeepSeek",url:"https://api.deepseek.com",protocol:"openai-completions"},
+  {id:"openai",label:"OpenAI",url:"https://api.openai.com/v1",protocol:"openai-responses"},
+  {id:"anthropic",label:"Anthropic / Claude",url:"https://api.anthropic.com/v1",protocol:"anthropic-messages"},
+  {id:"qwen",label:"阿里云百炼 / 通义千问（北京）",url:"https://dashscope.aliyuncs.com/compatible-mode/v1",protocol:"openai-completions"},
+  {id:"siliconflow",label:"硅基流动",url:"https://api.siliconflow.cn/v1",protocol:"openai-completions"},
+  {id:"ollama",label:"本机 Ollama",url:"http://127.0.0.1:11434/v1",protocol:"openai-completions"},
+  {id:"lmstudio",label:"本机 LM Studio",url:"http://127.0.0.1:1234/v1",protocol:"openai-completions"},
+];
+function applyPreset() { const preset=servicePresets.find(item=>item.id===selectedPreset.value)!; form.apiUrl=preset.url; form.protocol=preset.protocol; form.label=preset.id==='custom'?'':preset.label; form.apiKey=''; models.value=[]; formError.value=''; }
+
 const visible = defineModel<boolean>({ default: false });
 const providerForm = ref<FormInstance>();
 const form = reactive({ id: "", label: "", apiUrl: "", protocol: "openai-completions", apiKey: "" });
@@ -237,7 +251,8 @@ onBeforeUnmount(() => request?.abort());
 watch([() => form.id, () => form.apiUrl, () => form.protocol, () => form.apiKey], () => request?.abort());
 
 function resetForm() {
-  Object.assign(form, { id: "", label: "", apiUrl: "", protocol: "openai-completions", apiKey: "" });
+  selectedPreset.value = "custom";
+  Object.assign(form, { id: props.comicStudio ? `service${crypto.randomUUID().replaceAll("-", "")}` : "", label: "", apiUrl: "", protocol: "openai-completions", apiKey: "" });
   models.value = [];
   expandedModels.value = new Set();
   fetchedModels.value = [];
@@ -397,6 +412,7 @@ async function addProvider() {
 </script>
 
 <style lang="scss" scoped>
+.servicePresets { display:grid; gap:10px; margin:0 0 20px; p { color:var(--el-text-color-secondary); line-height:1.7; font-size:13px; margin:0; } } .serviceNotice { color:var(--el-text-color-secondary); line-height:1.6; }
 .customProviderForm {
   padding-right: 12px;
 

@@ -2,9 +2,10 @@
   <section class="researchDesk surface" id="researchDesk">
     <div class="sectionTitle"><h2>补充这个主题的素材</h2></div>
     <p>选择热词后，在这里搜索同一个主题。搜索结果只有标题时会标明；已收集的正文、人工核对笔记会一起交给编剧。</p>
-    <label for="researchKeyword">要研究的热词或剧情梗</label><input id="researchKeyword" v-model="keyword" maxlength="80" placeholder="例如：职场热梗、已读不回、MBTI下班" />
+    <template v-if="!embedded"><label for="researchKeyword">要研究的热词或剧情梗</label><input id="researchKeyword" v-model="keyword" maxlength="80" placeholder="例如：职场热梗、已读不回、MBTI下班" />
     <div class="researchActions"><label v-for="item in platforms" :key="item.id"><input v-model="selected" type="checkbox" :value="item.id" />{{ item.label }}</label><button class="primaryButton" :disabled="disabled || !keyword.trim() || !selected.length" @click="emit('collect', keyword.trim(), selected)">搜索并建立素材包</button></div>
     <details><summary>平台连接说明</summary><small>小红书使用本人会话搜索；抖音和B站需先在平台设置打开专用浏览器并登录。豆瓣读取公开讨论搜索，弱智吧读取公开列表并按关键词筛选，受限时需在官网本人处理。失败平台单独说明，保留成功结果。</small></details>
+    </template>
     <p v-if="status" role="status">{{ status }}</p>
     <template v-if="project.researchPacks.length">
       <label for="researchPack">专题素材包</label><select id="researchPack" v-model="selectedPack"><option v-for="item in project.researchPacks" :key="item.id" :value="item.id">{{ item.keyword }} · {{ item.materials.length }}条 · {{ new Date(item.createdAt).toLocaleString('zh-CN') }}</option></select>
@@ -20,7 +21,7 @@
 import { computed, ref, watch } from "vue";
 import type { ComicProject } from "./model";
 import { safeLink } from "./model";
-const props = defineProps<{ project: ComicProject; disabled: boolean; status: string }>();
+const props = defineProps<{ project: ComicProject; embedded?: boolean; disabled: boolean; status: string }>();
 const keyword = defineModel<string>("keyword", { default: "" });
 const emit = defineEmits<{ collect: [keyword: string, platforms: string[]]; save: []; use: [id: string]; detail: [packId: string, topicId: string] }>();
 const platforms = [{ id: "xhsLocal", label: "小红书" }, { id: "douyin", label: "抖音" }, { id: "bilibili", label: "B站" }, { id: "tieba", label: "弱智吧" }, { id: "douban", label: "豆瓣" }];
