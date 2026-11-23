@@ -46,7 +46,8 @@ jobs:
           fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           built=$(gh api "repos/$GH_REPO/actions/runs/$buildRun")
-          [[ $(jq -er '.head_sha' <<< "$built") == "$sha" ]]
+          triggerSha=$(jq -er '.head_sha' <<< "$built")
+          printf 'commit=%s\ntriggerSha=%s\n' "$sha" "$triggerSha" >> "$GITHUB_OUTPUT"
           [[ $(gh release view "$releaseTag" --json isDraft --jq .isDraft) == true ]]
           printf 'version=%s\n' "${releaseTag#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
@@ -58,8 +59,15 @@ jobs:
       - name: 核对安装包和更新清单
         env:
           version: ${{ steps.version.outputs.version }}
+          expectedCommit: ${{ steps.version.outputs.commit }}
+          triggerCommit: ${{ steps.version.outputs.triggerSha }}
         run: |
           cd artifacts
+          if [[ -f buildCommit.txt ]]; then
+            [[ $(cat buildCommit.txt) == "$expectedCommit" ]]
+          else
+            [[ "$triggerCommit" == "$expectedCommit" ]]
+          fi
           case "$target" in
             windowsX64) prefix=stable-win-x64; suffix=windows-x64.exe; installer="toonflow-$version-Setup.exe" ;;
             macArm64) prefix=stable-macos-arm64; suffix=macos-arm64.dmg; installer=macos-arm64-xiaolengComic.dmg ;;
@@ -74,5 +82,9 @@ jobs:
           test -s "$archive" && test -s "$installer"
           publicName="xiaolengComic-$version-$suffix"
           mv -- "$installer" "$publicName"
-          sha256sum -- "$publicName" "$manifest" "$archive" | tee -a "$GITHUB_STEP_SUMMARY"
+          sha256sum -- "$publicName" "$manifest" "$archive" | tee "$RUNNER_TEMP/stagedSha256" >> "$GITHUB_STEP_SUMMARY"
           gh release upload "$releaseTag" "$publicName" "$manifest" "$archive"
+          assets=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$releaseTag\") | .assets")
+          while read -r sha name; do
+            jq -e --arg name "$name" --arg digest "sha256:$sha" 'any(.[]; .name == $name and .state == "uploaded" and .digest == $digest)' <<< "$assets" >/dev/null
+          done < "$RUNNER_TEMP/stagedSha256"

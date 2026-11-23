@@ -365,6 +365,10 @@ jobs:
           await mkdir(directory, { recursive: true });
           await copyFile("build/mobile/toonflowMobile.apk", join(directory, apkName));
           '
+      - name: 记录安装包对应的源码提交
+        env:
+          releaseFolder: ${{ matrix.releaseFolder }}/${{ needs.prepare.outputs.version }}
+        run: git rev-parse HEAD > "$releaseFolder/buildCommit.txt"
       - name: 上传构建产物
         id: artifact
         uses: actions/upload-artifact@v7
