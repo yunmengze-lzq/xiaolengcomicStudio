@@ -4,17 +4,18 @@
     <div class="assetFilters"><label for="assetUsage">引用情况<select id="assetUsage" v-model="usageFilter"><option value="all">全部图片</option><option value="unused">未被引用 · 可回收</option><option value="history">仅历史版本 · 保留保护</option><option value="used">当前或设定使用中</option></select></label><label for="assetState">查看<select id="assetState" v-model="state"><option value="active">在库素材</option><option value="trash">素材回收站</option></select></label><label for="assetPlatform">来源平台<select id="assetPlatform" v-model="platform"><option value="">全部平台</option><option v-for="name in platforms" :key="name">{{ name }}</option></select></label><label>更新起始日期<input v-model="from" type="date" /></label><label>更新截止日期<input v-model="to" type="date" /></label><label>搜索<input v-model="keyword" placeholder="文件、来源、模型或提示词" /></label></div>
     <p>{{ visibleRows.length }} 张 · 按最近更新时间排序；未知创建时间不会猜测。</p><button v-if="state === 'active' && usageFilter === 'unused'" :disabled="disabled || working || !visibleRows.length" @click="recycleUnused">将筛选出的 {{ visibleRows.length }} 张未引用图片移入回收站</button>
     <p v-if="error" role="alert">{{ error }}</p>
-    <div class="assetCards"><article v-for="row in visibleRows.slice(0, limit)" :key="row.path"><img v-if="imageUrls[row.path] || diskUrls[row.path]" :src="imageUrls[row.path] || diskUrls[row.path]" :alt="`素材 ${row.path}`" loading="lazy" /><div><strong>{{ row.record ? methodLabels[row.record.method] : '来源待补录' }}</strong><small>{{ platformName(row.record) }} · {{ day(row.record?.updatedAt || row.record?.createdAt) || '时间待补录' }}</small><code>{{ row.path }}</code><p>{{ usage.get(row.path)?.join('、') || '当前未被作品引用' }}</p><div class="assetActions"><button :disabled="disabled || working" @click="download(row.path)">下载原图</button><button v-if="state === 'trash'" :disabled="disabled || working" @click="setTrash(row.path, false)">恢复素材</button><button v-else :disabled="disabled || working || usage.has(row.path)" :title="usage.has(row.path) ? '先解除角色、画风或漫画中的引用' : '保留文件，可恢复'" @click="setTrash(row.path, true)">移入回收站</button></div><details><summary>来源、平台与生成记录</summary><template v-if="row.record"><label>来源平台<input v-model="row.record.platform" list="assetPlatforms" maxlength="100" @change="touch(row.record)" /></label><label>生成方式<select v-model="row.record.method" @change="touch(row.record)"><option v-for="(label, value) in methodLabels" :key="value" :value="value">{{ label }}</option></select></label><label>来源或作者<input v-model="row.record.source" maxlength="2000" @change="touch(row.record)" /></label><label>授权依据<input v-model="row.record.license" maxlength="2000" @change="touch(row.record)" /></label><label>模型<input v-model="row.record.model" maxlength="800" @change="touch(row.record)" /></label><label>提示词<textarea v-model="row.record.prompt" rows="4" maxlength="20000" @change="touch(row.record)"></textarea></label><small>创建：{{ row.record.createdAt || '未知' }} · 更新：{{ row.record.updatedAt || '未修改' }}</small></template><button v-else :disabled="disabled" @click="register(row.path); emit('save')">补录来源</button></details></div></article></div>
-    <button v-if="visibleRows.length > limit" @click="limit += 50">再显示50张</button>
+    <div ref="assetCards" class="assetCards"><article v-for="row in visibleRows.slice(page * pageSize, (page + 1) * pageSize)" :key="row.path"><workspaceImage :directory="directory" :path="row.path" :alt="`素材 ${row.path}`" /><div><strong>{{ row.record ? methodLabels[row.record.method] : '来源待补录' }}</strong><small>{{ platformName(row.record) }} · {{ day(row.record?.updatedAt || row.record?.createdAt) || '时间待补录' }}</small><code>{{ row.path }}</code><p>{{ usage.get(row.path)?.join('、') || '当前未被作品引用' }}</p><div class="assetActions"><button :disabled="disabled || working" @click="download(row.path)">下载原图</button><button v-if="state === 'trash'" :disabled="disabled || working" @click="setTrash(row.path, false)">恢复素材</button><button v-else :disabled="disabled || working || usage.has(row.path)" :title="usage.has(row.path) ? '先解除角色、画风或漫画中的引用' : '保留文件，可恢复'" @click="setTrash(row.path, true)">移入回收站</button></div><details><summary>来源、平台与生成记录</summary><template v-if="row.record"><label>来源平台<input v-model="row.record.platform" list="assetPlatforms" maxlength="100" @change="touch(row.record)" /></label><label>生成方式<select v-model="row.record.method" @change="touch(row.record)"><option v-for="(label, value) in methodLabels" :key="value" :value="value">{{ label }}</option></select></label><label>来源或作者<input v-model="row.record.source" maxlength="2000" @change="touch(row.record)" /></label><label>授权依据<input v-model="row.record.license" maxlength="2000" @change="touch(row.record)" /></label><label>模型<input v-model="row.record.model" maxlength="800" @change="touch(row.record)" /></label><label>提示词<textarea v-model="row.record.prompt" rows="4" maxlength="20000" @change="touch(row.record)"></textarea></label><small>创建：{{ row.record.createdAt || '未知' }} · 更新：{{ row.record.updatedAt || '未修改' }}</small></template><button v-else :disabled="disabled" @click="register(row.path); emit('save')">补录来源</button></details></div></article></div>
+    <nav v-if="pageCount > 1" class="assetActions" aria-label="素材页"><button :disabled="page === 0" @click="changePage(page - 1)">上一页</button><span>{{ page + 1 }} / {{ pageCount }}</span><button :disabled="page + 1 >= pageCount" @click="changePage(page + 1)">下一页</button></nav>
     <datalist id="assetPlatforms"><option v-for="name in ['本机导入', 'AI生成', '小红书', '抖音', 'B站', '贴吧', '豆瓣']" :key="name">{{ name }}</option></datalist>
   </section>
 </template>
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted, onBeforeUnmount, watch } from "vue";
+import { computed, ref, onMounted, watch } from "vue";
 import type { ComicProject } from "./model";
+import workspaceImage from "./workspaceImage.vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import saveFile from "@/lib/saveFile";
-const props = defineProps<{ project: ComicProject; directory: string; disabled: boolean; imageUrls: Record<string, string> }>();
+const props = defineProps<{ project: ComicProject; directory: string; disabled: boolean; }>();
 const emit = defineEmits<{ save: [] }>();
 type Asset = ComicProject["assets"][number];
 const state = ref("active");
@@ -26,9 +27,9 @@ const keyword = ref("");
 const error = ref("");
 const working = ref(false);
 const diskPaths = ref<string[]>([]);
-const diskUrls = reactive<Record<string, string>>({});
-const limit = ref(50);
-const acquired = new Map<string, ReturnType<ReturnType<typeof useWorkspaceFiles>["acquireUrl"]>>();
+const assetCards = ref<HTMLElement>();
+const page = ref(0);
+const pageSize = 24;
 const methodLabels: Record<Asset["method"], string> = { unknown: "来源待补录", upload: "本机导入", conversation: "对话生成后导入", imageApi: "在线图片 API", codex: "Codex 生成", local: "本机模型生成" };
 const usage = computed(() => {
   const paths = new Map<string, string[]>();
@@ -65,10 +66,13 @@ const visibleRows = computed(() => rows.value.filter((row) => {
 }).sort((a, b) => (b.record?.updatedAt || b.record?.createdAt || "").localeCompare(a.record?.updatedAt || a.record?.createdAt || "")));
 async function scan() { error.value = ""; try { const listing = await useWorkspaceFiles(props.directory).list("assets"); diskPaths.value = listing.entries.filter((item) => item.type === "file" && /^assets\/[a-zA-Z0-9_-]+\.(png|jpg|webp)$/.test(item.path)).map((item) => item.path); } catch { error.value = "素材文件列表读取失败，可重试；已有档案仍保留。"; } }
 onMounted(scan);
-watch(() => visibleRows.value.slice(0, limit.value).map((row) => row.path), async (paths) => {
-  await Promise.all(paths.map(async (path) => { if (props.imageUrls[path] || acquired.has(path)) return; const handle = useWorkspaceFiles(props.directory).acquireUrl(path); acquired.set(path, handle); try { const url = await handle.url; if (acquired.get(path) === handle) diskUrls[path] = url; } catch { handle.release(); acquired.delete(path); } }));
-}, { immediate: true });
-onBeforeUnmount(() => { acquired.forEach((handle) => handle.release()); acquired.clear(); });
+const pageCount = computed(() => Math.ceil(visibleRows.value.length / pageSize));
+watch([state, usageFilter, platform, from, to, keyword], () => { page.value = 0; });
+watch(pageCount, count => { page.value = Math.min(page.value, Math.max(0, count - 1)); });
+function changePage(next: number) {
+  page.value = next;
+  assetCards.value?.scrollIntoView({ block: "start" });
+}
 function register(path: string) { let record = props.project.assets.find((item) => item.path === path); if (!record) { record = { path, method: "unknown", source: "", license: "", prompt: "", model: "", createdAt: "" }; props.project.assets.push(record); } return record; }
 function touch(asset: Asset) { asset.updatedAt = new Date().toISOString(); emit("save"); }
 function setTrash(path: string, trash: boolean) { if (trash && usage.value.has(path)) { error.value = "该图片仍被角色、画风或漫画引用，请先解除引用。"; return; } const asset = register(path); asset.trashedAt = trash ? new Date().toISOString() : ""; touch(asset); }

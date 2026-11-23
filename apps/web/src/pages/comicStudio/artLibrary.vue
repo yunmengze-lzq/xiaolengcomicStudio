@@ -1,6 +1,6 @@
 <template>
   <section class="artLibrary" aria-label="公共美术库">
-    <section v-if="!hideSelectionTray" class="selectedTray" aria-label="本篇已选资源"><strong>{{ kind === 'characters' ? `本篇已选 ${selectedItems.length} 位角色` : '本篇画风' }}</strong><p v-if="!selectedItems.length">{{ kind === 'characters' ? '尚未选择角色，请从下方选用。' : '尚未选择画风，请从下方选用。' }}</p><div class="selectedItems"><div v-for="item in selectedItems" :key="item.id"><img v-if="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :src="preview(item) || selectedUrls?.['image' in item ? item.image : item.refs.at(-1)?.path || '']" :alt="item.name" /><span>{{ item.name }}</span><button class="textButton" :disabled="working" :aria-label="`取消选用${item.name}`" @click="perform(() => remove(kind, item.id))">× 取消</button></div></div><small>选用只影响本篇；编辑后可通过卡片“更多”更新本篇设定。</small></section>
+    <section v-if="!hideSelectionTray" class="selectedTray" aria-label="本篇已选资源"><strong>{{ kind === 'characters' ? `本篇已选 ${selectedItems.length} 位角色` : '本篇画风' }}</strong><p v-if="!selectedItems.length">{{ kind === 'characters' ? '尚未选择角色，请从下方选用。' : '尚未选择画风，请从下方选用。' }}</p><div class="selectedItems"><div v-for="item in selectedItems" :key="item.id"><workspaceImage v-if="preview(item)" :directory="selectedDirectory" :path="preview(item)" :alt="item.name" /><span>{{ item.name }}</span><button class="textButton" :disabled="working" :aria-label="`取消选用${item.name}`" @click="perform(() => remove(kind, item.id))">× 取消</button></div></div><small>选用只影响本篇；编辑后可通过卡片“更多”更新本篇设定。</small></section>
     <header><div><h2>{{ kind === 'characters' ? '我的角色' : '我的画风' }}</h2><p>所有创作空间共用 · 保存一次，随时复用</p></div><button class="primaryButton" :disabled="working" @click="createItem">{{ kind === 'characters' ? '新建角色' : '新建画风' }}</button></header>
     <div class="libraryTools"><input v-model="query" :aria-label="kind === 'characters' ? '搜索公共角色' : '搜索公共画风'" placeholder="搜索名称或描述" /><label v-if="!selectionLabel"><input v-model="showDeleted" type="checkbox" />回收站</label><button class="textButton" :disabled="working" @click="perform(load)">刷新</button></div>
     <p v-if="message" role="status">{{ message }}</p>
@@ -8,8 +8,8 @@
     <p v-if="library.warnings.length" class="libraryError">{{ library.warnings.join('；') }}</p>
     <div class="libraryCards">
       <article v-for="item in visibleItems" :key="item.id" :class="{ selectedCard: selectedItems.some((row) => row.id === item.id) }">
-        <button class="libraryPreview" :aria-label="`编辑${item.name}`" :disabled="working || showDeleted" @click="editItem(item)"><img v-if="preview(item)" :src="preview(item)" :alt="`${item.name}实例图`" /><span v-else>暂无实例图 · 编辑后添加</span></button>
-        <div class="libraryCardBody"><h3>{{ item.name }} <span v-if="selectedItems.some((row) => row.id === item.id)" class="selectedBadge">{{ selectionLabel ? '本篇已有' : '✓ 已选' }}</span></h3><p>{{ 'personality' in item ? item.personality || '尚未填写性格' : item.description }}</p><small>{{ 'image' in item ? '公共角色档案' : item.refs.length ? '含参考图与画风说明' : '文字画风 · 尚无参考图' }}</small>
+        <button class="libraryPreview" :aria-label="`编辑${item.name}`" :disabled="working || showDeleted" @click="editItem(item)"><workspaceImage v-if="preview(item)" :directory="directory" :path="preview(item)" :alt="`${item.name}实例图`" /><span v-else>暂无实例图 · 编辑后添加</span></button>
+        <div class="libraryCardBody"><h3>{{ item.name }} <span v-if="selectedItems.some((row) => row.id === item.id)" class="selectedBadge">{{ selectionLabel ? '本篇已有' : '✓ 已选' }}</span></h3><p>{{ 'personality' in item ? item.personality || '尚未填写性格' : item.description }}</p><small>{{ builtinIds.has(item.id) ? '内置示例 · 可编辑复用' : 'image' in item ? '公共角色档案' : item.refs.length ? '含参考图与画风说明' : '文字画风 · 尚无参考图' }}</small>
           <div class="libraryActions" v-if="!showDeleted"><button class="primaryButton" :disabled="working" @click="!selectionLabel && selectedItems.some(row => row.id === item.id) ? perform(() => remove(kind, item.id)) : useItem(item)">{{ selectionLabel || (selectedItems.some(row => row.id === item.id) ? '取消选用' : '选用于本篇') }}</button><button class="textButton" :disabled="working" @click="editItem(item)">编辑</button><details class="cardMore"><summary>更多</summary><button v-if="selectedItems.some(row => row.id === item.id)" class="textButton" :disabled="working" @click="useItem(item)">更新本篇设定</button><button class="textButton" :disabled="working" @click="trash(item.id)">移到回收站</button></details></div>
           <button v-else class="secondaryButton" :disabled="working" @click="restore(item.id)">恢复</button>
         </div>
@@ -17,15 +17,15 @@
     </div>
     <p v-if="!visibleItems.length && !working" class="helperText">{{ showDeleted ? '回收站为空' : query ? '没有匹配的内容' : '从新建开始，保存后的内容会出现在这里。' }}</p>
     <details v-if="kind === 'styles'" class="textPresets"><summary>文字预设 · 可选起点</summary><div><button v-for="preset in textPresets" :key="preset.id" class="textButton" @click="createStyle(preset)">{{ preset.name }}</button></div><p>仅填入描述；生成或上传实例图后，保存到“我的画风”。</p></details>
-    <el-dialog v-model="editorOpen" :title="editorKind === 'characters' ? '角色档案' : '画风档案'" width="min(1040px, 94vw)" :closeOnClickModal="false" :beforeClose="closeEditor">
+    <el-dialog v-model="editorOpen" destroyOnClose :title="editorKind === 'characters' ? '角色档案' : '画风档案'" width="min(1040px, 94vw)" :closeOnClickModal="false" :beforeClose="closeEditor">
       <div v-if="draft" class="libraryEditor">
         <div class="designWorkspace"><div class="designSettings">
         <details class="creationBrief" :open="briefingOpen" @toggle="briefingOpen = ($event.target as HTMLDetailsElement).open"><summary>1 · 创作起点 <small>用一句话或参考图整理设定</small></summary><div class="briefFields">
           <div class="creationModes" role="tablist" aria-label="创作方式"><button role="tab" :aria-selected="creationMode === 'text'" :class="{ active: creationMode === 'text' }" @click="creationMode = 'text'">文字创作</button><button role="tab" :aria-selected="creationMode === 'image'" :class="{ active: creationMode === 'image' }" @click="creationMode = 'image'">图片参考</button></div>
           <p>{{ creationMode === 'text' ? '描述想法，AI整理设定；不会把已有角色图片作为图生图输入。' : '上传参考图，说明保留或改变什么，再提取设定。' }}</p>
-          <template v-if="creationMode === 'image'"><label class="secondaryButton">选择参考图片<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="working" @change="upload" /></label><div class="inputReferences"><img v-for="path in draftPaths.slice(0, 4)" :key="path" :src="urls[path]" alt="本次分析参考图" /></div><label v-if="'referenceIntent' in draft">参考目的<select v-model="draft.referenceIntent"><option value="redesign">提取元素，重新设计</option><option value="identity">保持人物，改变姿态</option><option value="style">只参考画风</option></select></label></template>
+          <template v-if="creationMode === 'image'"><label class="secondaryButton">选择参考图片<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="working" @change="upload" /></label><div class="inputReferences"><workspaceImage v-for="path in draftPaths.slice(0, 4)" :key="path" :directory="directory" :path="path" alt="本次分析参考图" /></div><label v-if="'referenceIntent' in draft">参考目的<select v-model="draft.referenceIntent"><option value="redesign">提取元素，重新设计</option><option value="identity">保持人物，改变姿态</option><option value="style">只参考画风</option></select></label></template>
           <label>{{ creationMode === 'text' ? '描述你的想法' : '希望保留或改变什么' }}<textarea v-model="brief" rows="3" maxlength="3500" :placeholder="editorKind === 'characters' ? '例如：蓝发、鲸鱼发饰的女孩，热情迷糊、嘴硬心软。' : '例如：细线日漫、柔和赛璐璐、暖色生活背景。'" /></label>
-          <template v-if="editorKind === 'characters'"><label>生成画风<select v-model="creationStyleId"><option value="">按描述中的画风</option><option v-for="style in availableStyles" :key="style.id" :value="style.id">{{ style.name }}</option></select></label><div v-if="creationStyle" class="styleChoice"><img v-if="preview(creationStyle)" :src="preview(creationStyle)" :alt="creationStyle.name" /><div><strong>{{ creationStyle.name }}</strong><p>{{ preview(creationStyle) ? '使用此画风的描述与参考图' : '文字画风，尚无预览图' }}</p><details><summary>画风描述</summary><p>{{ creationStyle.description }}</p></details></div></div></template>
+          <template v-if="editorKind === 'characters'"><label>生成画风<select v-model="creationStyleId"><option value="">按描述中的画风</option><option v-for="style in availableStyles" :key="style.id" :value="style.id">{{ style.name }}</option></select></label><div v-if="creationStyle" class="styleChoice"><workspaceImage v-if="preview(creationStyle)" :directory="directory" :path="preview(creationStyle)" :alt="creationStyle.name" /><div><strong>{{ creationStyle.name }}</strong><p>{{ preview(creationStyle) ? '使用此画风的描述与参考图' : '文字画风，尚无预览图' }}</p><details><summary>画风描述</summary><p>{{ creationStyle.description }}</p></details></div></div></template>
           <details v-else><summary>从网上找参考图</summary><label>画风关键词<input v-model="searchTerms" placeholder="如 watercolor illustration / anime" /></label><button class="secondaryButton" :disabled="working || !searchTerms.trim()" @click="findExamples">搜索案例</button><div class="exampleGrid"><article v-for="example in examples" :key="example.title"><img :src="example.thumbnail" :alt="example.title" /><p>{{ example.title }}</p><a :href="example.source" target="_blank" rel="noopener noreferrer">来源与授权</a><button class="secondaryButton" :disabled="working" @click="chooseExample(example)">选中并分析</button></article></div><p v-if="searchMessage" role="status">{{ searchMessage }}</p></details>
           <button class="secondaryButton" :disabled="working" @click="analyze">{{ working ? '处理中…' : '整理设定' }}</button>
         </div></details>
@@ -35,10 +35,10 @@
         <label v-if="'personality' in draft">性格与习惯<textarea v-model="draft.personality" rows="3" maxlength="1500" /></label>
         <details class="advancedDesign"><summary>更多设定 · {{ editorKind === 'characters' ? '对白、动机与细节' : '排除的效果' }}</summary><template v-if="'personality' in draft"><label>对白语气<textarea v-model="draft.speechStyle" rows="2" maxlength="1000" /></label><label>动机<textarea v-model="draft.motivation" rows="2" maxlength="1000" /></label><label>剧情别名<input v-model="draft.aliases" maxlength="500" /></label><label>固定外形摘要<textarea v-model="draft.visualSummary" rows="2" maxlength="1000" /></label><label>补充画风<textarea v-model="draft.artDirection" rows="2" maxlength="1000" /></label></template><label v-else>避免的效果<textarea v-model="draft.avoid" rows="2" maxlength="20000" /></label></details>
         </section></div><aside class="designPreview"><h3>3 · 效果预览</h3>
-        <div class="editorImages"><figure v-if="preview(draft)"><img :src="preview(draft)" alt="当前正式预览" /><figcaption>{{ 'image' in draft ? '正式形象' : '画风预览' }}</figcaption></figure><div v-else class="designEmpty"><strong>预览将在这里出现</strong><p>整理设定并微调，再生成参考图。</p></div></div>
+        <div class="editorImages"><figure v-if="preview(draft)"><workspaceImage :directory="directory" :path="preview(draft)" alt="当前正式预览" /><figcaption>{{ 'image' in draft ? '正式形象' : '画风预览' }}</figcaption></figure><div v-else class="designEmpty"><strong>预览将在这里出现</strong><p>整理设定并微调，再生成参考图。</p></div></div>
         <div class="generationControls"><label v-if="'designView' in draft">输出形式<select v-model="draft.designView"><option value="fullBody">单人立绘</option><option value="turnaround">三视图</option><option value="sheet">角色设定图</option><option value="expressions">表情图</option><option value="portrait">头像</option></select></label><button class="primaryButton" :disabled="working || !imageModel?.configured" @click="generate">根据当前设定生成预览</button></div>
         <details><summary>本次调用服务</summary><p>{{ analysisLabel }}；出图：{{ imageModel?.label || '尚未配置' }}。仅点击才调用。</p></details>
-        <details v-if="draftPaths.length"><summary>管理图片 · {{ draftPaths.length }} 张</summary><div class="editorImages"><figure v-for="path in draftPaths" :key="path"><img :src="urls[path]" alt="档案图片" /><button v-if="'image' in draft && draft.image !== path" class="textButton" @click="draft.image = path">设为正式图</button><button class="textButton" @click="removeImage(path)">移除</button></figure></div></details>
+        <details v-if="draftPaths.length"><summary>管理图片 · {{ draftPaths.length }} 张</summary><div class="editorImages"><figure v-for="path in draftPaths" :key="path"><workspaceImage :directory="directory" :path="path" alt="档案图片" /><button v-if="'image' in draft && draft.image !== path" class="textButton" @click="draft.image = path">设为正式图</button><button class="textButton" @click="removeImage(path)">移除</button></figure></div></details>
         </aside></div>
         <p v-if="message" role="status">{{ message }}</p>
         <p v-if="error" role="alert" class="libraryError">{{ error }}</p>
@@ -49,7 +49,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import workspaceImage from "./workspaceImage.vue";
+import { computed, onMounted, ref, watch } from "vue";
 import axios from "axios";
 import { z } from "zod";
 import { ElMessageBox } from "element-plus";
@@ -60,7 +61,7 @@ import { stylePresets, dailyAnimeStyle } from "./stylePresets";
 import modelGirlsPack from "../../../public/characterPacks/modelGirls/manifest.json";
 
 type Model = { providerId: string; modelId: string; label: string; configured?: boolean };
-const props = defineProps<{ kind: "characters" | "styles"; selectionLabel?: string; hideSelectionTray?: boolean; imageModel?: Model; selectedItems: (Character | ArtStyle)[]; selectedUrls?: Record<string, string>; activeStyleId?: string; analysisLabel: string;
+const props = defineProps<{ kind: "characters" | "styles"; selectionLabel?: string; hideSelectionTray?: boolean; imageModel?: Model; selectedItems: (Character | ArtStyle)[]; selectedDirectory: string; activeStyleId?: string; analysisLabel: string;
   remove: (kind: "characters" | "styles", id: string) => Promise<void>;
   analyzeDesign: (input: { directory: string; purpose: "character" | "style"; intent: "identity" | "redesign" | "style"; request: string; paths: string[] }) => Promise<any>;
   requestImage: (model: Model, directory: string, prompt: string, references: string[]) => Promise<any>; apply: (kind: "characters" | "styles", item: Character | ArtStyle, directory: string) => Promise<void> }>();
@@ -69,7 +70,6 @@ const library = ref<z.infer<typeof schema>>({ characters: [], styles: [], delete
 const directory = ref("");
 const files = useWorkspaceFiles(directory);
 let revision = "";
-const urls = reactive<Record<string, string>>({});
 const query = ref("");
 const brief = ref("");
 const creationMode = ref<"text" | "image">("text");
@@ -90,18 +90,17 @@ const editorKind = ref<"characters" | "styles">("characters");
 const editorOpen = ref(false);
 const briefingOpen = ref(false);
 let initialDraft = "";
+const builtinIds = new Set([...modelGirlsPack.characters, ...modelGirlsPack.styles].map(item => item.id));
 const textPresets = [dailyAnimeStyle, ...stylePresets];
 const visibleItems = computed(() => library.value[props.kind].filter((item) => library.value.deleted.includes(item.id) === showDeleted.value && `${item.name} ${item.description}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 const paths = (item: Character | ArtStyle) => [...new Set([ ...("image" in item ? [item.image, ...item.designImages.map((image) => image.path)] : []), ...item.refs.map((ref) => ref.path)].filter(Boolean))];
 const draftPaths = computed(() => draft.value ? paths(draft.value) : []);
-const preview = (item: Character | ArtStyle) => urls["image" in item ? item.image : item.refs.at(-1)?.path || ""];
-async function hydrate(item: Character | ArtStyle) { for (const path of paths(item)) if (!urls[path]) urls[path] = URL.createObjectURL(new Blob([await files.read(path)])); }
+const preview = (item: Character | ArtStyle) => "image" in item ? item.image : item.refs.at(-1)?.path || "";
 async function load() {
   if (!directory.value) directory.value = (await axios.post("/api/comicStudio/artLibrary", {}, { headers: { "x-toonflow-workspace": "1" } })).data.data.directory;
   const snapshot = await files.readTextSnapshot("library.json");
   library.value = schema.parse(JSON.parse(snapshot.text)); revision = snapshot.revision;
   if (!library.value.seeded) await seedBuiltins();
-  await Promise.all([...library.value.characters, ...library.value.styles].map(hydrate));
 }
 async function seedBuiltins() {
   const next = structuredClone(JSON.parse(JSON.stringify(library.value))) as z.infer<typeof schema>;
@@ -114,7 +113,9 @@ async function seedBuiltins() {
     const blob = await response.blob();
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())), (value) => value.toString(16).padStart(2, "0")).join("");
     if (hash !== source.sha256) throw new Error("内置角色素材校验失败");
-    const image = await putImage(blob);
+    const image = `assets/${source.sha256}.png`;
+    try { await files.write(image, blob, true); }
+    catch (error) { if (!axios.isAxiosError(error) || error.response?.status !== 409) throw error; }
     next.characters.push(characterSchema.parse({ ...character, image, referenceIntent: "identity", designView: "turnaround", referenceAnalysis: character.referenceNote, designImages: [{ path: image, view: "turnaround" }], refs: [{ id: crypto.randomUUID(), path: image, source: source.source, license: source.license, note: character.referenceNote }] }));
   }
   for (const style of modelGirlsPack.styles) {
@@ -139,13 +140,13 @@ async function saveDraft() { await perform(async () => { if (!draft.value) retur
 async function trash(id: string) { const ok = await ElMessageBox.confirm("移入公共库回收站？已有作品和图片保留，可随时恢复。", "删除库内容", { confirmButtonText: "移入回收站", cancelButtonText: "保留" }).then(() => true, () => false); if (ok) await perform(() => persist({ ...library.value, deleted: [...library.value.deleted, id] })); }
 async function restore(id: string) { await perform(() => persist({ ...library.value, deleted: library.value.deleted.filter((value) => value !== id) })); }
 async function useItem(item: Character | ArtStyle) { await perform(async () => { await props.apply(props.kind, item, directory.value); message.value = `已将「${item.name}」用于当前作品；修改公共档案后可再次应用更新`; }); }
-async function putImage(blob: Blob) { if (!["image/png","image/jpeg","image/webp"].includes(blob.type) || blob.size > 15 * 1024 * 1024) throw new Error("请使用15MB以内的PNG、JPG或WebP"); const bitmap = await createImageBitmap(blob); const valid = bitmap.width * bitmap.height <= 30_000_000; bitmap.close(); if (!valid) throw new Error("图片像素过多"); const path = `assets/${crypto.randomUUID()}.${blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png"}`; await files.write(path, blob, true); urls[path] = URL.createObjectURL(blob); return path; }
+async function putImage(blob: Blob) { if (!["image/png","image/jpeg","image/webp"].includes(blob.type) || blob.size > 15 * 1024 * 1024) throw new Error("请使用15MB以内的PNG、JPG或WebP"); const bitmap = await createImageBitmap(blob); const valid = bitmap.width * bitmap.height <= 30_000_000; bitmap.close(); if (!valid) throw new Error("图片像素过多"); const path = `assets/${crypto.randomUUID()}.${blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png"}`; await files.write(path, blob, true); return path; }
 function addImage(path: string, generated: boolean) { if (!draft.value) return; if ("image" in draft.value) { if (!draft.value.image) draft.value.image = path; draft.value.designImages.push({ path, view: draft.value.designView }); } else draft.value.refs.push({ id: crypto.randomUUID(), path, source: generated ? "自定义 AI 生成" : "本地上传", note: "仅参考画风，不复制人物身份", license: "" }); }
 async function upload(event: Event) { const input = event.target as HTMLInputElement; const file = input.files?.[0]; input.value = ""; if (file) await perform(async () => addImage(await putImage(file), false)); }
 function removeImage(path: string) { if (!draft.value) return; draft.value.refs = draft.value.refs.filter((ref) => ref.path !== path); if ("image" in draft.value) { draft.value.designImages = draft.value.designImages.filter((image) => image.path !== path); if (draft.value.image === path) draft.value.image = ""; } }
 async function generate() { await perform(async () => { if (!draft.value || !props.imageModel?.configured) throw new Error("请先选择已配置的出图服务"); const item = draft.value; if (creationMode.value === "image" && !paths(item).length) throw new Error("请先选择参考图片，或切换文字创作"); if (!item.description.trim() && !paths(item).length) throw new Error("请填写描述或上传参考图"); const character = "image" in item; const hasCharacterReference = character && creationMode.value === "image" && !!item.image; let references = character ? [...new Set([...(hasCharacterReference ? [item.image] : []), ...(creationStyle.value?.refs.slice(-1).map((ref) => ref.path) || [])])].slice(0, 4) : creationMode.value === "image" ? item.refs.map((ref) => ref.path).slice(0, 4) : []; if (props.imageModel.providerId === "zImage" && creationMode.value === "text") references = []; if (props.imageModel.providerId === "zImage" && references.length) throw new Error("Z-Image不适合此多参考创作，请在上方切换klein或支持参考图的服务"); let prompt = character ? characterPrompt(item, { description: creationStyle.value?.description || item.artDirection || "清晰动漫线条、柔和赛璐璐上色", avoid: "" }, ["fluxKlein","zImage"].includes(props.imageModel.providerId)) : `生成一张原创漫画画风实例图，只参考输入图的线条、配色、上色和比例，不复制人物或构图。要求：${item.description}。避免：${item.avoid}。不画文字、标签或水印。`; if (character && references.length) prompt += `\n参考图顺序：${hasCharacterReference ? "第1张为角色参考；" : ""}${creationStyle.value?.refs.length ? "最后1张仅供画风参考，不要复制其中的人物。" : ""}参考意图：${{ redesign: "提取元素重新设计原创人物，不复刻输入构图", identity: "保持角色身份，按指定视图重新绘制", style: "只参考画风，根据文字创造新的角色" }[item.referenceIntent]}。`;
 if (character && creationStyle.value) item.artDirection = creationStyle.value.description.slice(0, 1000);
-const response = await props.requestImage(props.imageModel, directory.value, prompt, references); const path = response.data.data?.[0]?.path; if (!path) throw new Error(response.data.message || "未返回图片"); addImage(path, true); if (character) item.image = path; await hydrate(item); }); }
+const response = await props.requestImage(props.imageModel, directory.value, prompt, references); const path = response.data.data?.[0]?.path; if (!path) throw new Error(response.data.message || "未返回图片"); addImage(path, true); if (character) item.image = path; }); }
 async function analyzeDraft() {
   if (!draft.value) return;
   const item = draft.value;
@@ -179,7 +180,6 @@ async function chooseExample(example: Example) {
   });
 }
 onMounted(() => perform(load));
-onBeforeUnmount(() => Object.values(urls).forEach(URL.revokeObjectURL));
 </script>
 
 <style scoped lang="scss">

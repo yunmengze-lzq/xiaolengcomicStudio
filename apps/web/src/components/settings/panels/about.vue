@@ -54,7 +54,7 @@
     </el-card>
 
     <el-card class="infoCard repositoryCard" shadow="never">
-      <a class="repositoryLink" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库：HBAI-Ltd/Toonflow-app">
+      <a class="repositoryLink" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" aria-label="小冷漫画 GitHub 仓库">
         <icon-brand-github class="repositoryIcon" :size="22" aria-hidden="true" />
         <div class="repositoryInfo">
           <span class="repositoryTitle">GitHub 仓库</span>
@@ -207,6 +207,7 @@
 </template>
 
 <script setup lang="ts">
+import { repositoryUrl } from "../../../../../../appConfig.ts";
 import { translate, t } from "@toonflow/i18n/vue";
 
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref } from "vue";
@@ -242,7 +243,7 @@ import {
 } from "@/stores/desktopUpdate";
 
 const messageMarkdown = defineAsyncComponent(() => import("@/components/messageMarkdown.vue"));
-const repositoryUrl = "https://github.com/HBAI-Ltd/Toonflow-app";
+
 const communityUrl = "https://work.weixin.qq.com/u/vc36adcc89845edcbe?v=5.0.3.63936&bb=85b8d228e8";
 const clientBuild = ref<{ version: string; channel: string }>();
 const currentVersion = computed(() => isDesktop && isRemoteConnection

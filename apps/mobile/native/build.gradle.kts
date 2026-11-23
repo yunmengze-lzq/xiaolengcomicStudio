@@ -12,7 +12,7 @@ android {
   buildToolsVersion = "36.0.0"
 
   defaultConfig {
-    applicationId = "com.toonflow.mobile"
+    applicationId = "com.xiaoleng.comicstudio"
     minSdk = 26
     targetSdk = 34
     versionCode = providers.gradleProperty("mobileVersionCode").orElse("1").get().toInt()
@@ -27,11 +27,17 @@ android {
       keyAlias = "androiddebugkey"
       keyPassword = "android"
     }
+    if (providers.environmentVariable("xiaolengAndroidKeystore").isPresent) create("xiaolengSigning") {
+      storeFile = file(providers.environmentVariable("xiaolengAndroidKeystore").get())
+      storePassword = providers.environmentVariable("xiaolengAndroidPassword").get()
+      keyAlias = "xiaolengComic"
+      keyPassword = storePassword
+    }
   }
   buildTypes {
     debug { signingConfig = signingConfigs.getByName("defaultSigning") }
     release {
-      signingConfig = signingConfigs.getByName("defaultSigning")
+      signingConfig = signingConfigs.findByName("xiaolengSigning") ?: signingConfigs.getByName("defaultSigning")
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))

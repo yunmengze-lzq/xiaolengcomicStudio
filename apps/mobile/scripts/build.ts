@@ -1,6 +1,7 @@
 import { copyFile, cp, existsSync, mkdir, readFile, readdir, realpath, rm, writeAtomic } from "@toonflow/file";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import config from "../../../electrobun.config";
+import { appVersion } from "../../../appConfig";
+import modelGirlsPack from "../../web/public/characterPacks/modelGirls/manifest.json";
 
 const mobileRoot = resolve(import.meta.dir, "..");
 const projectRoot = resolve(mobileRoot, "../..");
@@ -9,8 +10,10 @@ const staging = join(buildRoot, "staging");
 const sdkRoot = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
 const javaRoot = process.env.JAVA_HOME;
 const abis = ["arm64-v8a"];
-const version = config.app.version;
+const version = appVersion;
 const release = process.env.androidRelease === "1";
+const windows = process.platform === "win32";
+const executableSuffix = windows ? ".exe" : "";
 
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Android 版本号必须为 X.Y.Z。");
 const [major, minor, patch] = version.split(".").map(Number);
@@ -19,7 +22,6 @@ if (![major, minor, patch].every(Number.isSafeInteger) || minor > 999 || patch >
   throw new Error("Android 版本号的 minor、patch 必须在 0–999 内，生成的 versionCode 必须在 1–2100000000 内。");
 }
 
-if (process.platform !== "win32") throw new Error("当前 Android 验证构建使用 Windows SDK，请在 Windows 上执行。");
 if (!sdkRoot) throw new Error("请设置 ANDROID_HOME 为 Android SDK 目录。");
 
 function requireFile(path: string, help: string) {
@@ -31,11 +33,13 @@ function requireFile(path: string, help: string) {
 requireFile(join(mobileRoot, "native/defaultSigning.keystore"), "请使用包含默认签名文件的完整源码。");
 requireFile(join(sdkRoot, "platforms/android-37.1/package.xml"), "请使用 SDK Manager 安装 Android SDK Platform 37.1。");
 requireFile(join(sdkRoot, "platforms/android-37.1/android.jar"), "请安装 Android SDK Platform 37.1。");
-const aapt = requireFile(join(sdkRoot, "build-tools/36.0.0/aapt2.exe"), "请安装 Android SDK Build Tools 36.0.0。");
+const aapt = requireFile(join(sdkRoot, `build-tools/36.0.0/aapt2${executableSuffix}`), "请安装 Android SDK Build Tools 36.0.0。");
 const signer = requireFile(join(sdkRoot, "build-tools/36.0.0/lib/apksigner.jar"), "请安装 Android SDK Build Tools 36.0.0。");
-const java = requireFile(javaRoot ? join(javaRoot, "bin/java.exe") : Bun.which("java.exe") || "java.exe", "请设置 JAVA_HOME 为 JDK 17 或更高版本目录。");
+const java = requireFile(javaRoot ? join(javaRoot, `bin/java${executableSuffix}`) : Bun.which(`java${executableSuffix}`) || "", "请设置 JAVA_HOME 为 JDK 17 或更高版本目录。");
 for (const abi of abis) requireFile(join(buildRoot, "runtime", abi, "libbun.so"), "请先执行 bun run --cwd apps/mobile setup。");
-const gradleLauncher = requireFile(join(buildRoot, "gradle/gradle-9.6.0/lib/gradle-gradle-cli-main-9.6.0.jar"), "请先执行 bun run --cwd apps/mobile setup。");
+const gradleLauncher = windows
+  ? [java, "-cp", requireFile(join(buildRoot, "gradle/gradle-9.6.0/lib/gradle-gradle-cli-main-9.6.0.jar"), "请先执行 bun run --cwd apps/mobile setup。"), "org.gradle.launcher.GradleMain", "--gradle-user-home", join(buildRoot, "gradleHome")]
+  : [Bun.which("gradle") || "gradle"];
 
 async function run(command: string[], cwd = staging) {
   const result = Bun.spawn(command, { cwd, env: process.env, stdout: "inherit", stderr: "inherit" });
@@ -60,7 +64,19 @@ const result = await Bun.build({
   define: { "process.env.appVersion": JSON.stringify(version) },
 });
 if (!result.success) throw new AggregateError(result.logs, "构建移动端服务失败");
-for (const directory of ["web", "nodes", "tools", "ext", "providers", "skills"]) {
+const webRoot = join(projectRoot, "build/web");
+const characterImages = new Set(modelGirlsPack.characters.map(character => {
+  const source = modelGirlsPack.sources.find(item => item.id === character.sourceId);
+  if (!source || !/^[a-zA-Z0-9]+\.png$/.test(source.file)) throw new Error(`内置素材清单无效：${character.id}`);
+  requireFile(join(webRoot, "characterPacks/modelGirls", source.file), "请完整构建内置素材。");
+  return source.file;
+}));
+await cp(webRoot, join(payload, "web"), { recursive: true, filter: path => {
+  const name = relative(webRoot, path).split(/[\\/]/);
+  // ACT: Android 仅分发应用会使用的设定稿，素材的原始采集图与过程稿留在源码。
+  return name[0] !== "characterPacks" || name.length < 3 || characterImages.has(name[2]!) || name[2] === "manifest.json";
+} });
+for (const directory of ["nodes", "tools", "ext", "providers", "skills"]) {
   await cp(join(projectRoot, "build", directory), join(payload, directory), { recursive: true });
 }
 // ACT: Photon 与 anydoc 按自身目录读取 WASM，沿用 server 的完整 external 包布局。
@@ -102,8 +118,7 @@ await cp(join(mobileRoot, "native/res"), resources, { recursive: true });
 await mkdir(join(resources, "drawable-nodpi"), { recursive: true });
 await copyFile(join(projectRoot, "packages/assets/logo.iconset/icon_512x512.png"), join(resources, "drawable-nodpi/logo.png"));
 await run([
-  java, "-cp", gradleLauncher, "org.gradle.launcher.GradleMain", "--offline", "--no-daemon", "--console=plain",
-  "--gradle-user-home", join(buildRoot, "gradleHome"), "--project-cache-dir", join(buildRoot, "gradleProject"),
+  ...gradleLauncher, "--offline", "--no-daemon", "--console=plain", "--project-cache-dir", join(buildRoot, "gradleProject"),
   "-Pandroid.builder.sdkDownload=false",
   `-Pandroid.aapt2FromMavenOverride=${aapt}`, `-PmobileVersion=${version}`, `-PmobileVersionCode=${versionCode}`,
   release ? "assembleRelease" : "assembleDebug",

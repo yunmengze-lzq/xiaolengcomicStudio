@@ -117,13 +117,13 @@ import type { MediaProvider } from "./types";
 import { providerPrompt } from "./providerPrompt";
 import { modelChoices, saveSettings } from "@/stores/settings";
 import { writeClipboardText } from "@/lib/clipboard";
-import { isMobile } from "@/lib/platform";
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 
 const { mode = "custom", comicStudio = false } = defineProps<{ mode?: "builtin" | "custom"; comicStudio?: boolean }>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ added: [provider: MediaProvider] }>();
 const providerSources: Record<string, string> = { tfRouter: tfRouterSource, apiMart: apiMartSource, metaso: metasoSource, compshare: compshareSource, comfyLocal: comfyLocalSource, imageApi: imageApiSource };
-const availableProviders = computed(() => mediaProviders.filter((item) => !comicStudio || ["comfyLocal", "imageApi"].includes(item.id)));
+const availableProviders = computed(() => mediaProviders.filter((item) => !comicStudio || (item.id === "imageApi" || ((!isMobile || isRemoteMobile) && item.id === "comfyLocal"))));
 const selectedProvider = ref<string>(availableProviders.value[0]?.id ?? "");
 const activeProvider = computed(() => mediaProviders.find(provider => provider.id === selectedProvider.value));
 const models = computed<MediaProvider["models"]>(() => activeProvider.value?.models ?? []);

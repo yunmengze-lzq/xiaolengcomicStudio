@@ -6,7 +6,7 @@
         <div class="taskHeading"><span>{{ task.number }}</span><div><h4>{{ task.title }}</h4><p>{{ task.description }}</p></div></div>
         <label :for="`task${task.id}`">使用的服务</label>
         <select :id="`task${task.id}`" :title="choiceLabel(task.id)" :value="selection(task.id)" @change="choose(task.id, ($event.target as HTMLSelectElement).value)">
-          <option value="">请选择模型</option><option v-if="task.id !== 'image'" value="codex">本机 Codex CLI · 需登录与联网</option><option v-if="task.id === 'vision'" value="inherit">沿用编剧 · {{ textLabel }}</option>
+          <option value="">请选择模型</option><option v-if="!phoneLocal && task.id !== 'image'" value="codex">本机 Codex CLI · 需登录与联网</option><option v-if="task.id === 'vision'" value="inherit">沿用编剧 · {{ textLabel }}</option>
           <option v-for="model in task.id === 'image' ? imageModels : textModels" :key="key(model)" :value="key(model)">{{ modelLabel(model) }}</option>
         </select>
         <p class="selectionState">{{ state(task.id) }}</p>
@@ -14,12 +14,13 @@
         <p v-if="messages[task.id]" class="checkResult" role="status">{{ messages[task.id] }}</p>
       </article>
     </div>
-    <div class="nextSteps"><strong>不知道怎么选？</strong><p>已有 API：添加供应商，填写地址和密钥，获取模型列表，再回这里分配任务。想离线运行：先检测电脑环境，再安装或连接本地服务。</p><button @click="emit('configure', 'languageModel')">配置在线 / 兼容 API</button><button @click="emit('configure', 'comicLocal')">检测或安装本地模型 · 含 MOSS 指引</button></div>
-    <details class="advanced"><summary>高级与诊断 · Codex 参数、真实文本试运行</summary><label>Codex 模型 ID<input v-model="codexModel" maxlength="101" /></label><label>推理强度<select v-model="textEffort"><option value="low">快速</option><option value="medium">均衡</option><option value="high">细致</option><option value="xhigh">深入</option></select></label><p>连接检测只读取模型列表或本机状态，不生成内容。下面的试运行会调用编剧模型，可能产生费用。</p><button :disabled="modelChecking || !selection('text')" @click="emit('probe')">{{ modelChecking ? '正在试运行…' : '真实文本试运行 · 可能计费' }}</button><p role="status">{{ modelProbeMessage }}</p></details>
+    <div class="nextSteps"><strong>不知道怎么选？</strong><p>已有 API：添加供应商，填写地址和密钥，获取模型列表，再回这里分配任务。{{ phoneLocal ? "无需配置模型也可以手动写脚本、导入图和排版。" : "想离线运行：先检测电脑环境，再安装或连接本地服务。" }}</p><button @click="emit('configure', 'languageModel')">配置在线 / 兼容 API</button><button v-if="!phoneLocal" @click="emit('configure', 'comicLocal')">检测或安装本地模型 · 含 MOSS 指引</button></div>
+    <details v-if="!phoneLocal" class="advanced"><summary>高级与诊断 · Codex 参数、真实文本试运行</summary><label>Codex 模型 ID<input v-model="codexModel" maxlength="101" /></label><label>推理强度<select v-model="textEffort"><option value="low">快速</option><option value="medium">均衡</option><option value="high">细致</option><option value="xhigh">深入</option></select></label><p>连接检测只读取模型列表或本机状态，不生成内容。下面的试运行会调用编剧模型，可能产生费用。</p><button :disabled="modelChecking || !selection('text')" @click="emit('probe')">{{ modelChecking ? '正在试运行…' : '真实文本试运行 · 可能计费' }}</button><p role="status">{{ modelProbeMessage }}</p></details>
   </section>
 </template>
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 import axios from 'axios';
 import { customProviders, settings } from '@/stores/settings';
 type Model = { providerId: string; modelId: string; label: string; configured?: boolean };
@@ -33,6 +34,7 @@ const referenceAnalysisMode = defineModel<'selected' | 'codex' | 'api'>('referen
 const referenceModel = defineModel<string>('referenceModel', { required: true });
 const codexModel = defineModel<string>('codexModel', { required: true });
 const textEffort = defineModel<'low' | 'medium' | 'high' | 'xhigh'>('textEffort', { required: true });
+const phoneLocal = isMobile && !isRemoteMobile;
 const tasks: {id: Task; number: string; title: string; description: string}[] = [{id:'text',number:'01',title:'编剧与分镜',description:'整理素材、创作故事、生成分镜和文案。'},{id:'vision',number:'02',title:'图片分析',description:'理解参考图，提取角色外形与画风。需要视觉输入能力。'},{id:'image',number:'03',title:'图像生成',description:'绘制角色、画风样张和漫画。与图片分析独立。'}];
 const key = (model: Model) => `${model.providerId}/${model.modelId}`;
 function modelLabel(model: Model) { const provider=customProviders.value.find(item=>item.id===model.providerId); return provider ? `${provider.label} · ${model.label}` : model.label; }

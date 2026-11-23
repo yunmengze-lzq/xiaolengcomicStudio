@@ -1,6 +1,6 @@
 <template>
-  <el-dialog v-model="visible" title="设置中心" width="min(1080px, calc(100vw - 32px))" alignCenter appendToBody>
-    <div class="settings" :class="{ comicSettings: props.comicStudio }">
+  <el-dialog v-model="visible" :fullscreen="props.comicStudio && isMobile" title="设置中心" width="min(1080px, calc(100vw - 32px))" alignCenter appendToBody>
+    <div class="settings" :class="{ comicSettings: props.comicStudio, mobileComicSettings: props.comicStudio && isMobile }">
       <aside class="sidebar" aria-label="设置分类">
         <template v-for="item in visiblePanels" :key="item.id">
           <h3 v-if="item.groupLabel" class="settingsGroupLabel">{{ item.groupLabel }}</h3>
@@ -50,7 +50,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
-import { isMobile } from "@/lib/platform";
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 import {
   IconPalette,
   IconSettings,
@@ -125,10 +125,10 @@ const visiblePanels = computed(() => props.comicStudio ? [
 ] : availablePanels.value);
 const activePanel = computed(() => availablePanels.value.find((item) => item.id === panel.value) || availablePanels.value[0]!);
 const sectionPanels = computed(() => availablePanels.value.filter(item => settingsSection(item.id) === settingsSection(activePanel.value.id)).sort((a, b) => ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(a.id) - ["comicDefaults", "languageModel", "mediaModel", "comicLocal", "comicOverview"].indexOf(b.id)));
-const modelTabs = [{ id: "languageModel", label: "文本与识图 API" }, { id: "mediaModel", label: "生图 API / ComfyUI" }, { id: "comicLocal", label: "本地环境与安装" }];
+const modelTabs = [{ id: "languageModel", label: "文本与识图 API" }, { id: "mediaModel", label: isMobile && !isRemoteMobile ? "生图 API" : "生图 API / ComfyUI" }, { id: "comicLocal", label: "本地环境与安装" }];
 const modelTab = ref("languageModel");
 const modelView = ref("tasks");
-const modelViews = [{id:"tasks",label:"任务配置"},{id:"services",label:"服务管理"},{id:"local",label:"本地安装与连接"}];
+const modelViews = [{id:"tasks",label:"任务配置"},{id:"services",label:"服务管理"}, ...(!isMobile || isRemoteMobile ? [{id:"local",label:"本地安装与连接"}] : [])];
 const modelSection = computed(() => props.comicStudio && settingsSection(activePanel.value.id) === "comicDefaults");
 const visible = defineModel<boolean>({ default: false });
 watch([panel, () => visible.value], ([value]) => { modelView.value = value === "comicLocal" ? "local" : ["languageModel", "mediaModel"].includes(value) ? "services" : "tasks"; if (["languageModel", "mediaModel"].includes(value)) modelTab.value = value; }, { immediate: true });
@@ -256,5 +256,11 @@ watch([panel, () => visible.value], ([value]) => { modelView.value = value === "
     .sidebar { display: flex; gap: 4px; .settingsItem { flex: 1; gap: 5px; padding: 10px 4px; font-size: 12px; span { display: inline; } } }
     .content { padding: 0 4px; min-height: 0; }
   }
+}
+
+.settings.mobileComicSettings {
+  height: calc(100dvh - 88px);
+  .settingsItem, .settingsSubnav button { min-height: 48px; }
+  .panelTitle { margin-bottom: 12px; }
 }
 </style>

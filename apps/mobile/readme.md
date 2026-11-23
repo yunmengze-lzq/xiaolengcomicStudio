@@ -1,6 +1,12 @@
-# Toonflow Android
+# 小冷漫画 Android
 
 优先使用系统 Android WebView；系统内核缺少所需能力时，切换到 APK 内置的 ARM64 GeckoView，无需联网下载备用内核。两种内核均加载同一 APK 内 Bun 启动的真实 Toonflow 前端和后端。页面复用 `apps/web`，后端通过 `@toonflow/server/app` 接入，内置节点、工具、扩展、供应商和技能沿用现有构建产物。
+
+## 手机创作
+
+APK 内置手机工作台和本地项目服务。窄屏用底部导航切换创作、数据、档案和设置；顶部切换空间与创作步骤。手动写剧本、编排画格、导入图片和导出可以离线完成。使用 AI 编剧、识图或生图时，在「设置 → 模型与生成」中管理服务并分别分配任务。手机独立模式提供公开来源和手动添加素材；依赖电脑浏览器的账号采集、Codex CLI 和桌面模型安装由桌面版运行。
+
+「角色与美术」提供 12 张角色设定稿和 2 套带示例的画风，首次进入时登记到公共库，之后可直接选用、编辑和复用。图片按可见范围读取，手机预览一次生成当前页；批量导出逐页处理。超过 100 MB 时可选择分别导出单页。
 
 ## 设备互联与手动连接
 
@@ -18,9 +24,7 @@
 
 配对设备可使用该后端的模型配置和业务功能，仅应授权自己的可信设备。共享目录是工作区接口的范围，服务器自带 `data/workspaces` 也可访问；这不是第三方插件或 Agent 代码执行的沙箱。不要让电脑和手机同时编辑同一画布：本次互联不提供多人实时协作或冲突合并。
 
-应用默认横屏运行，使用 `sensorLandscape`，可随设备方向在两个横屏方向之间切换。沉浸式全屏隐藏状态栏与导航栏，边缘滑动可临时唤出系统栏；Agent 保留原有可拖动、调整大小及停靠的悬浮窗。
-
-手机端默认使用 75% 界面缩放，可在「设置 → 界面设置 → 界面缩放」通过滑块调整为 50%–100%，每档 5%。拖动时只显示所选比例，松手后生效并随应用设置保存。使用 WebView 视口缩放，画布和弹出层保持统一坐标，保留原有页面布局与设置侧栏。
+应用支持设备旋转；窄屏优先单栏、分步操作和单页编辑。漫画工作台使用正常屏幕比例，Android 状态栏、导航栏和输入法由系统管理。旧画布界面的缩放仍在原设置中调整。
 
 使用官方 **Bun 1.4.2 Android** 运行时，仅构建 `arm64-v8a`。打包参考社区 [minapk](https://github.com/jjtseng93/minapk) 的原生库目录启动方式；通过 Gradle 与 Android SDK 构建，不依赖其终端环境。Bun 运行时随 APK 安装到原生库目录，JS、WASM 和页面复制到应用程序目录，设置与工作区保存在独立的数据目录。来源和许可证见 [thirdParty.md](thirdParty.md)。
 
@@ -30,7 +34,7 @@
 
 ## 构建
 
-当前脚本用于 Windows，需要 Bun、JDK 17 或更新版本，以及已接受许可的 Android SDK 目录。`setup` 自动安装 Platform 37.1 和 Build Tools 36.0.0。在仓库根目录执行：
+构建需要 Bun、JDK 17 或更新版本，以及已接受许可的 Android SDK 目录。Windows 使用固定 Gradle 版本，macOS 使用 PATH 中的 Gradle（本次验证用 9.8.2）。`setup` 自动安装 Platform 37.1 和 Build Tools 36.0.0。在仓库根目录执行：
 
 ```powershell
 # 本机已有的 SDK / JDK；其他机器按实际安装路径调整。
@@ -51,19 +55,17 @@ bun run --cwd apps/mobile build
 
 `build` 先调用根目录的 `build:server`，构建节点、工具、扩展、前端、后端及 MCP，再将移动端服务与 MCP stdio 入口一起构建，共享重复依赖。APK 的 payload 包含 `server.js`、`stdio.js`、共享代码块、`web`、`nodes`、`tools`、`ext`、`providers`、`skills` 和 Photon 的 JS/WASM 包；团队保持当前仓库未内置打包的状态。payload 内容生成 `revision.txt`，用于随构建更新内置插件。发行包启用 R8 代码优化与资源裁剪，保留 Gecko 官方消费者规则及完整 ARM64 内核。
 
-输出：`build/mobile/toonflowMobile.apk`。包名为 `com.toonflow.mobile`，最低 Android 8 / API 26，目标 API 34。本地和 CI 共用仓库内公开的默认签名 `native/defaultSigning.keystore`，别名为 `androiddebugkey`，密码均为 `android`。沿用此前本地默认签名，不再每次生成密钥，后续版本可直接覆盖安装并保留应用数据。
+输出为 `build/mobile/toonflowMobile.apk`。应用 ID 为 `com.xiaoleng.comicstudio`，最低 Android 8 / API 26，目标 API 34，支持 ARM64。
 
-版本默认沿用 `electrobun.config.ts` 的 `app.version`，可通过 `appVersion` 指定 `X.Y.Z`。Android `versionCode` 按 `X × 1000000 + Y × 1000 + Z` 生成，Y、Z 不超过 999，结果须在 1–2100000000 内；更新时使用更高版本号。
+分享版使用环境变量 `xiaolengAndroidKeystore`（PKCS#12 文件路径）与 `xiaolengAndroidPassword`，签名别名为 `xiaolengComic`。后续更新应复用这份签名私钥并提高版本号，才能覆盖安装。未配置私钥的内部构建使用仓库公开的默认签名。
 
-## GitHub Actions
+版本默认读取 `appConfig.ts`，可通过 `appVersion` 指定 `X.Y.Z`。Android `versionCode` 按 `X × 1000000 + Y × 1000 + Z` 生成，Y、Z 不超过 999，结果须在 1–2100000000 内；更新时使用更高版本号。
 
-在 Actions 中选择 **Debug build → Run workflow**，将 `target` 设为 `androidArm64` 可单独构建 ARM64 APK，选择 `all` 会同时构建桌面与 Android。版本留空时使用所选标签或项目配置。Android 默认生成 debug 包，可在本次运行的 Artifacts 或 Summary 中下载。开启 `androidRelease` 会启用 R8 和资源裁剪、关闭 `debuggable` 并去掉文件名中的 `-debug` 后缀；发布和分发应使用此模式。两种模式使用相同默认签名，无需配置 Android Secrets。
+## GitHub 发布
 
-现有 **Release Toonflow** 工作流在推送 `vX.Y.Z` 标签或手动发布时，会并行构建桌面与 Android，全部成功后将 `toonflow-X.Y.Z-android-arm64.apk` 附加到同一个 GitHub Release。Android APK 暂不上传到桌面更新托管接口，应用内「前往 GitHub 更新」会打开最新发布页。
+公开 APK 通过 [小冷漫画 Releases](https://github.com/yunmengze-lzq/xiaolengcomicStudio/releases) 分发。用版本标签对应的代码在本机生成签名包，与 GitHub Actions 构建的同版桌面包一起发布。私钥由维护者保管。详见[发布流程](../../docs/releaseManagement.md)。
 
-CI 使用 Windows 2025 自带 JDK 17 和已接受许可的 Android SDK 目录；依赖安装后，mobile `setup` 负责准备所需 SDK、GeckoView 与构建依赖，再执行离线 `build`。默认签名文件直接来自源码，Android 构建不读取签名 Secrets。
-
-本地需要复现发布构建时，设置 `androidRelease=1`，然后执行同一个 mobile `build` 命令。
+开发者可在 Actions 的 **Debug build** 中选择 `androidArm64` 生成内部测试包。内部包使用公开调试签名，应用 ID 与分享版相同，Android 会阻止不同签名的覆盖安装。
 
 ## 安装到 ARM64 设备
 
@@ -71,7 +73,7 @@ CI 使用 Windows 2025 自带 JDK 17 和已接受许可的 Android SDK 目录；
 $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
 & $adb devices -l
 & $adb -s <设备序列号> install --no-incremental -r build/mobile/toonflowMobile.apk
-& $adb -s <设备序列号> shell am start -W -n com.toonflow.mobile/.mobileActivity
+& $adb -s <设备序列号> shell am start -W -n com.xiaoleng.comicstudio/com.toonflow.mobile.mobileActivity
 ```
 
 设备序列号以 `adb devices` 输出为准；仅支持运行 ARM64 原生库的设备，不再提供 x86_64 APK。

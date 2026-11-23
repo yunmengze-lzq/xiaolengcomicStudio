@@ -19,9 +19,6 @@ import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
-import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -100,7 +97,7 @@ public class mobileActivity extends Activity {
   private boolean failed;
   private String browserStage = "waiting";
   private String systemMissing = "";
-  private final Runnable browserTimeout = () -> showError("浏览器启动超时。请完全退出并重新打开 Toonflow。" + (systemMissing.isEmpty() ? "" : "\n系统 WebView 缺少：" + systemMissing), null);
+  private final Runnable browserTimeout = () -> showError("浏览器启动超时。请完全退出并重新打开小冷漫画。" + (systemMissing.isEmpty() ? "" : "\n系统 WebView 缺少：" + systemMissing), null);
   private final Runnable startupTimeout = () -> {
     synchronized (processLock) {
       if (stopping || failed || localOrigin != null || bunProcess == null || !bunProcess.isAlive()) return;
@@ -113,16 +110,9 @@ public class mobileActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     uploadDirectory = new File(getCacheDir(), "browserUploads/" + UUID.randomUUID());
-    if (Build.VERSION.SDK_INT >= 28) {
-      WindowManager.LayoutParams attributes = getWindow().getAttributes();
-      attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-      getWindow().setAttributes(attributes);
-    }
+    getWindow().setStatusBarColor(Color.rgb(32, 56, 45));
+    getWindow().setNavigationBarColor(Color.rgb(32, 56, 45));
     root = new FrameLayout(this);
-    if (Build.VERSION.SDK_INT >= 30) root.setOnApplyWindowInsetsListener((view, insets) -> {
-      view.setPadding(0, 0, 0, insets.getInsets(WindowInsets.Type.ime()).bottom);
-      return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(), android.graphics.Insets.NONE).build();
-    });
     statusView = new TextView(this);
     statusView.setTextSize(16);
     statusView.setTextColor(Color.rgb(30, 41, 59));
@@ -133,7 +123,7 @@ public class mobileActivity extends Activity {
     root.addView(statusView, new FrameLayout.LayoutParams(-1, -1));
     progressView = new ProgressBar(this);
     progressView.setIndeterminateTintList(ColorStateList.valueOf(Color.rgb(64, 158, 255)));
-    progressView.setContentDescription("Loading Toonflow");
+    progressView.setContentDescription("正在启动小冷漫画");
     int progressSize = (int) (32 * getResources().getDisplayMetrics().density);
     root.addView(progressView, new FrameLayout.LayoutParams(progressSize, progressSize, Gravity.CENTER));
     setContentView(root);
@@ -417,7 +407,7 @@ public class mobileActivity extends Activity {
     }
     mainHandler.removeCallbacks(browserTimeout);
     if (missing.length() > 0) {
-      if (gecko) showError("内置 GeckoView 缺少所需能力：" + names + "。请更新 Toonflow。\n系统 WebView 缺少：" + systemMissing, null);
+      if (gecko) showError("内置 GeckoView 缺少所需能力：" + names + "。请更新小冷漫画。\n系统 WebView 缺少：" + systemMissing, null);
       else {
         systemMissing = names.toString();
         Log.w("ToonflowMobile", "System WebView missing: " + systemMissing);
@@ -496,10 +486,10 @@ public class mobileActivity extends Activity {
       });
       geckoSession.setContentDelegate(new GeckoSession.ContentDelegate() {
         @Override
-        public void onCrash(GeckoSession session) { showError("GeckoView 渲染进程已崩溃。请完全退出并重新打开 Toonflow。", null); }
+        public void onCrash(GeckoSession session) { showError("GeckoView 渲染进程已崩溃。请完全退出并重新打开小冷漫画。", null); }
 
         @Override
-        public void onKill(GeckoSession session) { showError("GeckoView 渲染进程被系统终止。请释放内存后重新打开 Toonflow。", null); }
+        public void onKill(GeckoSession session) { showError("GeckoView 渲染进程被系统终止。请释放内存后重新打开小冷漫画。", null); }
       });
       geckoSession.setPermissionDelegate(new GeckoSession.PermissionDelegate() {
         @Override
@@ -596,7 +586,7 @@ public class mobileActivity extends Activity {
         loadBrowserUrl(localOrigin.buildUpon().appendQueryParameter("probe", "1").appendQueryParameter("engine", "gecko").build().toString());
       }, error -> showError("无法初始化 GeckoView 原生通信：" + error.getMessage(), new IOException(error)));
     } catch (RuntimeException | LinkageError error) {
-      showError("无法启用内置 GeckoView：" + error.getMessage() + "。请更新 Toonflow 或系统 WebView。\n系统 WebView 缺少：" + systemMissing, new IOException(error));
+      showError("无法启用内置 GeckoView：" + error.getMessage() + "。请更新小冷漫画 或系统 WebView。\n系统 WebView 缺少：" + systemMissing, new IOException(error));
     }
   }
 
@@ -886,7 +876,7 @@ public class mobileActivity extends Activity {
         message.put("detail", new JSONObject(detail));
         try { geckoPort.postMessage(new JSONObject(message)); }
         catch (RuntimeException sendError) { showError("无法返回文件保存结果：" + sendError.getMessage(), sendError); }
-      } else showError("GeckoView 原生通信已断开。请重新打开 Toonflow。", null);
+      } else showError("GeckoView 原生通信已断开。请重新打开小冷漫画。", null);
     });
   }
 
@@ -952,23 +942,6 @@ public class mobileActivity extends Activity {
           process.destroyForcibly();
         }
       }, "mobileBunStop").start();
-    }
-  }
-
-  @Override
-  public void onWindowFocusChanged(boolean hasFocus) {
-    super.onWindowFocusChanged(hasFocus);
-    if (!hasFocus) return;
-    if (Build.VERSION.SDK_INT >= 30) {
-      getWindow().setDecorFitsSystemWindows(false);
-      WindowInsetsController controller = getWindow().getInsetsController();
-      if (controller == null) return;
-      controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-      controller.hide(WindowInsets.Type.systemBars());
-    } else {
-      getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
   }
 

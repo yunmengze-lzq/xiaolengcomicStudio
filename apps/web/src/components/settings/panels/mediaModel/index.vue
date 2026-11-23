@@ -31,7 +31,7 @@
         </div>
       </el-card>
     </div>
-    <p v-if="comicStudio && !sortedProviders.length" class="providerEmpty">尚未配置生图服务。添加你使用的图片API，或选择本地ComfyUI。预装供应商可从「添加供应商」中选择。</p>
+    <p v-if="comicStudio && !sortedProviders.length" class="providerEmpty">{{ phoneLocal ? "尚未配置生图服务。请添加图片 API。" : "尚未配置生图服务。添加图片 API，或选择本地 ComfyUI。" }}</p>
     <div class="providerActions">
       <el-button class="addButton" :icon="IconPlus" @click="openAdd('builtin')">添加供应商</el-button>
       <el-button class="addButton" :icon="IconSettings" @click="openAdd('custom')">添加自定义供应商</el-button>
@@ -42,6 +42,7 @@
 </template>
 
 <script setup lang="ts">
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 import axios from "axios";
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, shallowRef, type Component } from "vue";
 import { ElMessage } from "element-plus";
@@ -56,7 +57,8 @@ const { visible = true, comicStudio = false } = defineProps<{ visible?: boolean;
 const mediaProviderDialog = shallowRef<Component>();
 const editProviderDialog = shallowRef<Component>();
 const providers = ref<MediaProvider[]>([]);
-const sortedProviders = computed(() => [...providers.value].filter(item => !comicStudio || !["tfrouter", "apimart", "metaso", "compshare"].includes(item.id.toLowerCase()) || !!getProviderApiKey(item.id)).sort((a, b) => Number(b.id.toLowerCase() === "tfrouter") - Number(a.id.toLowerCase() === "tfrouter")));
+const phoneLocal = isMobile && !isRemoteMobile;
+const sortedProviders = computed(() => [...providers.value].filter(item => !comicStudio || ((!phoneLocal || item.id !== "comfyLocal") && (!["tfrouter", "apimart", "metaso", "compshare"].includes(item.id.toLowerCase()) || !!getProviderApiKey(item.id)))).sort((a, b) => Number(b.id.toLowerCase() === "tfrouter") - Number(a.id.toLowerCase() === "tfrouter")));
 const loaded = ref(false);
 const providerDialogVisible = ref(false);
 const editorVisible = ref(false);

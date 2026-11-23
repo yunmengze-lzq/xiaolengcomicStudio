@@ -4,13 +4,13 @@
     <aside ref="pageRail" class="pageRail" :class="{ collapsed: !showPages }" aria-label="漫画页导航">
       <button v-if="removedPage" @click="restorePage">撤销移除上一页</button>
       <strong>漫画页 <small>{{ episode.directPages.length }}</small></strong>
-      <button v-for="(page, index) in episode.directPages" :key="page.id" class="pageThumb" :aria-pressed="selected === page.id" @click="selected = page.id">
-        <img v-if="page.image" :src="imageUrls[page.image]" alt="" /><span v-else class="thumbPlaceholder">{{ String(index + 1).padStart(2, '0') }}</span>
+      <button v-for="(page, index) in episode.directPages" :key="page.id" class="pageThumb" :aria-pressed="selected === page.id" @click="selectPage(page.id)">
+        <workspaceImage v-if="page.image" :directory="directory" :path="page.image" alt="" /><span v-else class="thumbPlaceholder">{{ String(index + 1).padStart(2, '0') }}</span>
         <span>第 {{ index + 1 }} 页</span><small>{{ page.candidate ? '待选版本' : page.image ? '已出图' : '待生成' }}</small>
       </button>
       <button :disabled="busy || !episode.panels.length || episode.directPages.length >= 50" @click="addPage">＋ 添加页</button>
       <details class="pageManagement"><summary>分页与批量</summary><label>每页画面数<select v-model.number="episode.layout.perPage"><option :value="1">1 个</option><option :value="2">2 个</option><option :value="4">4 个</option></select></label><button :disabled="busy || !episode.panels.length" @click="planPages">补齐分页</button><button :disabled="busy || !!generationIssue || !episode.directPages.some(page => !page.image && !page.candidate)" @click="$emit('generateAll')">生成全部待出图页</button></details>
-      <details v-if="episode.panels.some(panel => panel.image)" class="pageManagement"><summary>复用已有图片</summary><div class="historyImages"><button v-for="(panel, index) in episode.panels.filter(panel => panel.image)" :key="panel.id" :disabled="busy || episode.directPages.length >= 50 || episode.directPages.some(page => page.image === panel.image)" @click="useExisting(panel)"><img :src="imageUrls[panel.image]" :alt="`已有图片 ${index + 1}`" />作为整页</button></div></details>
+      <details v-if="episode.panels.some(panel => panel.image)" class="pageManagement"><summary>复用已有图片</summary><div class="historyImages"><button v-for="(panel, index) in episode.panels.filter(panel => panel.image)" :key="panel.id" :disabled="busy || episode.directPages.length >= 50 || episode.directPages.some(page => page.image === panel.image)" @click="useExisting(panel)"><workspaceImage :directory="directory" :path="panel.image" :alt="`已有图片 ${index + 1}`" />作为整页</button></div></details>
     </aside>
     <div v-if="!episode.directPages.length" class="emptyWorkspace"><h3>从第一页开始</h3><p>按分镜自动分页，检查台词后生成含对白的漫画。</p><button :disabled="busy || !episode.panels.length" @click="planPages">按分镜建立漫画页</button><p v-if="!episode.panels.length">请先完成分镜设计。</p></div>
     <article v-for="(page, index) in episode.directPages" v-show="selected === page.id" :key="page.id" class="pageEditor">
@@ -18,7 +18,7 @@
         <header><strong>第 {{ index + 1 }} / {{ episode.directPages.length }} 页</strong><span>{{ page.panelIds.length }} 个画面 · 含对白</span><div class="pageNavigation"><button :disabled="busy" @click="removePage(page)">移除此页</button><button :disabled="index === 0" aria-label="上一漫画页" @click="selected = episode.directPages[index - 1]!.id">←</button><button :disabled="index === episode.directPages.length - 1" aria-label="下一漫画页" @click="selected = episode.directPages[index + 1]!.id">→</button></div></header>
         <div v-if="busy && progress.panelId === page.id" class="modelNotice" role="status">{{ progress.phase }} · {{ progress.elapsedSeconds }} 秒<progress aria-label="本页生成中"></progress></div>
         <p v-if="page.image && page.generationFingerprint !== fingerprintFor(page)" class="modelNotice">内容已修改，重绘后才能更新到图片。</p>
-        <div class="artCanvas" :class="{ comparing: !!page.candidate }"><figure><img v-if="page.image" :src="imageUrls[page.image]" alt="当前采用的整页漫画" /><div v-else class="emptyPage"><strong>本页还没有图片</strong><span>在右侧确认画面与台词，再生成本页</span></div><figcaption v-if="page.candidate">当前版本</figcaption></figure><figure v-if="page.candidate"><img :src="imageUrls[page.candidate.path]" alt="整页重绘候选" /><figcaption>重绘候选</figcaption></figure></div>
+        <div class="artCanvas" :class="{ comparing: !!page.candidate }"><figure><workspaceImage v-if="page.image" :directory="directory" :path="page.image" alt="当前采用的整页漫画" /><div v-else class="emptyPage"><strong>本页还没有图片</strong><span>确认画面与台词后生成本页</span></div><figcaption v-if="page.candidate">当前版本</figcaption></figure><figure v-if="page.candidate"><workspaceImage :directory="directory" :path="page.candidate.path" alt="整页重绘候选" /><figcaption>重绘候选</figcaption></figure></div>
         <div v-if="page.candidate" class="candidateActions"><button class="generateButton" :disabled="busy" @click="$emit('resolve', page, true)">采用新版</button><button :disabled="busy" @click="$emit('resolve', page, false)">保留当前版</button></div>
       </div>
       <aside class="pageScript">
@@ -31,22 +31,28 @@
         </div>
         <details><summary>排版与重绘要求</summary><label>文字方向<select v-model="page.vertical"><option :value="false">横排</option><option :value="true">竖排 · 从右往左</option></select></label><label>本次要求<textarea v-model="page.revisionRequest" rows="3" maxlength="2000" placeholder="描述布局，或指出上一版需要修改的地方" /></label></details>
 
-        <details><summary>导入与历史版本</summary><label>导入完整漫画页<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="busy || !page.panelIds.length || !!page.candidate" @change="importPage($event, page)" /></label><div class="historyImages"><button v-for="(path, version) in page.history" :key="path" :disabled="busy || !!page.candidate" @click="page.image = path; page.generationFingerprint = ''"><img :src="imageUrls[path]" :alt="`恢复版本 ${version + 1}`" />版本 {{ version + 1 }}</button></div><p v-if="!page.history.length" class="hint">生成后会保留历史图片。</p></details>
+        <details><summary>导入与历史版本</summary><label>导入完整漫画页<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="busy || !page.panelIds.length || !!page.candidate" @change="importPage($event, page)" /></label><div class="historyImages"><button v-for="(path, version) in page.history" :key="path" :disabled="busy || !!page.candidate" @click="page.image = path; page.generationFingerprint = ''"><workspaceImage :directory="directory" :path="path" :alt="`恢复版本 ${version + 1}`" />版本 {{ version + 1 }}</button></div><p v-if="!page.history.length" class="hint">生成后会保留历史图片。</p></details>
         <details><summary>高级 · 生成描述与页面管理</summary><p class="hint">模型决定中文准确度与人物一致性；需要精确排字时使用分格制作。</p><pre>{{ page.panelIds.length ? promptFor(page) : '请先选择画面' }}</pre></details>
       </aside>
     </article>
   </div>
 </template>
 <script setup lang="ts">
+import workspaceImage from "./workspaceImage.vue";
 import { nextTick, ref, watch } from "vue";
 import { ElMessageBox, ElMessage } from "element-plus";
+import { isMobile } from "@/lib/platform";
 import { newPanel, directPageInput } from "./model";
 import type { Episode, Panel } from "./model";
-const props = defineProps<{ episode: Episode; beforeRemove: () => Promise<void>; imageUrls: Record<string, string>; busy: boolean; generationIssue: string; progress: { panelId: string; phase: string; elapsedSeconds: number } }>();
+const props = defineProps<{ episode: Episode; beforeRemove: () => Promise<void>; directory: string; busy: boolean; generationIssue: string; progress: { panelId: string; phase: string; elapsedSeconds: number } }>();
 const emit = defineEmits<{ generateAll: []; import: [page: Episode["directPages"][number], file: File]; generate: [page: Episode["directPages"][number]]; resolve: [page: Episode["directPages"][number], accept: boolean] }>();
 const pageRail = ref<HTMLElement>();
 const selected = ref("");
-const showPages = ref(true);
+const showPages = ref(!isMobile);
+function selectPage(id: string) {
+  selected.value = id;
+  if (isMobile) showPages.value = false;
+}
 const removedPage = ref<{ episodeId: string; index: number; page: Episode["directPages"][number] }>();
 function restorePage() { const entry = removedPage.value; if (!entry || entry.episodeId !== props.episode.id) return; props.episode.directPages.splice(entry.index, 0, entry.page); selected.value = entry.page.id; removedPage.value = undefined; }
 watch(selected, async () => {
@@ -101,7 +107,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }button[aria-pressed="true"]
 .emptyPage { aspect-ratio: 3/4; background: #fafbf7; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 18px; text-align: center; color: #687566; }.emptyPage span { font-size: 12px; }.pageScript { min-height: 0; overscroll-behavior: contain; padding: 18px; display: grid; align-content: start; gap: 14px; min-width: 0; }.pageScript h3 { margin: 0; font-size: 15px; }.hint { font-size: 12px; color: #748071; line-height: 1.6; margin: 0; }label { display: grid; gap: 6px; font-size: 12px; }textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid #d5ddd2; border-radius: 6px; background: white; }textarea { resize: vertical; }.panelDialogue { display: grid; gap: 10px; }.panelChoice { display: flex; align-items: start; margin-top: 10px; }summary { cursor: pointer; font-size: 12px; padding: 8px 0; color: #526650; }details { border-top: 1px solid #e6eae3; }details label, details button { margin-top: 8px; }.pageManagement button { width: 100%; }pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; }.historyImages { display: flex; gap: 6px; flex-wrap: wrap; }.historyImages button { width: 70px; }.historyImages img { width: 100%; }.modelNotice { padding: 10px; font-size: 12px; color: #735c36; background: #fbf4e7; border-radius: 6px; }.candidateActions { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }.emptyWorkspace { padding: 60px 24px; text-align: center; }
 @media (max-width: 1100px) { .pageEditor { grid-template-columns: minmax(180px, 1fr) 250px; }.pageArtwork, .pageScript { min-height: 0; overscroll-behavior: contain; padding: 12px; } }
 .pageListToggle { display: none; }
-@media (max-width: 760px) { .directWorkspace { grid-template-columns: 1fr; }.pageListToggle { display: block; }.pageRail { max-height: 280px; overflow-y: auto; }.pageRail.collapsed { display: none; }.pageThumb { grid-template-columns: 60px 1fr; align-items: center; }.pageThumb img, .thumbPlaceholder { height: 60px; grid-row: span 2; }.pageEditor { grid-template-columns: 1fr; }.pageArtwork { max-height: 520px; overflow: auto; } }
+@media (max-width: 760px) { .directWorkspace { grid-template-columns: 1fr; }.pageListToggle { display: block; }.pageRail { max-height: 280px; overflow-y: auto; }.pageRail.collapsed { display: none; }.pageThumb { grid-template-columns: 60px 1fr; align-items: center; }.pageThumb img, .thumbPlaceholder { height: 60px; grid-row: span 2; }.pageEditor { grid-template-columns: 1fr; }.pageArtwork { max-height: none; }.emptyPage { min-height: 110px; aspect-ratio: auto; }.artCanvas img { max-height: 60dvh; } }
 @media (min-width: 761px) { .directWorkspace { min-height: 460px; height: max(460px, calc(100vh - 325px)); } .pageRail, .pageScript { overflow-y: auto; } .pageEditor { min-height: 0; } .pageArtwork { min-height: 0; overflow-y: auto; overscroll-behavior: contain; } .emptyPage { aspect-ratio: auto; min-height: 360px; height: calc(100% - 40px); box-sizing: border-box; } }
 .pageNavigation { display: flex; gap: 5px; } .pageNavigation button { padding: 4px 8px; }.pageArtwork header { align-items: center; flex-wrap: wrap; }
 </style>

@@ -2,7 +2,7 @@
   <div class="ui">
     <p class="intro">让创作空间更合你的习惯，修改会自动保存。</p>
 
-    <section v-if="isMobile" class="settingSection" aria-labelledby="mobileScaleTitle">
+    <section v-if="isMobile && !comicStudio" class="settingSection" aria-labelledby="mobileScaleTitle">
       <div class="settingHeader">
         <h3 id="mobileScaleTitle">界面缩放</h3>
         <span class="settingValue">{{ mobileScale }}%</span>

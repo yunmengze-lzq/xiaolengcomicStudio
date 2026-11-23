@@ -77,30 +77,46 @@ const frame = computed(() => panelFrame(props.episode, Math.max(0, props.episode
 let renderVersion = 0;
 let renderTimer: ReturnType<typeof setTimeout>;
 let stopDrag: (() => void) | undefined;
-const imageBytes = new Map<string, Promise<ArrayBuffer>>();
-const cachedFiles: Files = { read(path) { if (!imageBytes.has(path)) imageBytes.set(path, props.files.read(path).catch(error => { imageBytes.delete(path); throw error; })); return imageBytes.get(path)!; } };
+let renderController: AbortController | undefined;
+const imageBytes = new Map<string, ArrayBuffer>();
+const cachedFiles: Files = {
+  async read(path, signal) {
+    const existing = imageBytes.get(path);
+    if (existing) return existing;
+    const bytes = await props.files.read(path, signal);
+    signal?.throwIfAborted();
+    const cachedSize = [...imageBytes.values()].reduce((size, item) => size + item.byteLength, 0);
+    if (cachedSize + bytes.byteLength <= 12 * 1024 * 1024) imageBytes.set(path, bytes);
+    return bytes;
+  },
+};
 watch(() => [props.episode.panels, props.episode.layout, props.episode.castSnapshot, frame.value, previewCanvas.value], () => {
   const version = ++renderVersion;
+  renderController?.abort();
   clearTimeout(renderTimer);
   renderTimer = setTimeout(async () => {
     const needed = new Set(pageFrames.value.map(item => item.panel.image));
     for (const path of imageBytes.keys()) if (!needed.has(path)) imageBytes.delete(path);
     const target = previewCanvas.value;
     if (!target) return;
+    const controller = new AbortController();
+    renderController = controller;
+    const canvas = document.createElement("canvas");
     try {
       await loadComicFont(props.fontFamily);
-      const canvas = document.createElement("canvas");
+      controller.signal.throwIfAborted();
       canvas.width = 1080; canvas.height = 1440;
       const warnings: string[] = [], boxes: BubbleHitBox[] = [];
-      await drawCompositionPage(canvas.getContext("2d")!, cachedFiles, props.episode, pageIndex.value, warnings, props.panel.id, boxes);
+      await drawCompositionPage(canvas.getContext("2d")!, cachedFiles, props.episode, pageIndex.value, warnings, props.panel.id, boxes, controller.signal);
       if (version !== renderVersion) return;
       target.width = canvas.width; target.height = canvas.height;
       target.getContext("2d")!.drawImage(canvas, 0, 0);
       hitBoxes.value = boxes; layoutWarning.value = [...new Set(warnings)].join("；"); fontError.value = "";
     } catch(error) { if (version === renderVersion) fontError.value = (error as Error).message; }
+    finally { canvas.width = 0; canvas.height = 0; }
   }, 40);
 }, { deep: true, immediate: true, flush: "post" });
-onBeforeUnmount(() => { renderVersion++; clearTimeout(renderTimer); stopDrag?.(); imageBytes.clear(); });
+onBeforeUnmount(() => { renderVersion++; renderController?.abort(); clearTimeout(renderTimer); stopDrag?.(); imageBytes.clear(); });
 function selectedHeight(id: string) { return (hitBoxes.value.find(box => box.id === id)?.height || frame.value[3]! * .2) / frame.value[3]!; }
 function scaleBubble(line: Speech, scale: number) {
   line.width = Math.max(.15, Math.min(.95, line.width * scale));

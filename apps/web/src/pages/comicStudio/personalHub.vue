@@ -19,10 +19,10 @@
       </template>
       <template v-else-if="tab === 'journal'">
         <section class="hubCard"><h2>修改理由</h2><p>在工作台顶部填写理由后保存，会与本次变更一起记录。未填写时明确保留为空。</p><div class="flowStrip"><span>保存前</span><span>→ 修改内容与理由 →</span><span>保存后</span><span>→ 下一次创作</span></div></section>
-        <article v-for="entry in [...project.journal].reverse()" :key="entry.id" class="hubCard journalEntry"><small>{{ formatTime(entry.at) }}</small><h3>{{ entry.action }}</h3><p>{{ entry.reason || '本次未填写修改理由' }}</p><div class="tagList"><span v-for="section in entry.sections" :key="section">{{ sectionNames[section] || section }}</span></div><button class="textButton" @click="inspectRevision(entry.path)">展开修改前后</button><div v-if="revisionPath === entry.path" class="revisionView"><p v-if="revisionError" role="alert">{{ revisionError }}</p><article v-for="side in revisionSides" :key="side.label"><h4>{{ side.label }}</h4><pre class="revisionSummary">{{ side.summary }}</pre><div v-for="work in side.episodes" :key="work.id"><strong>{{ work.title }}</strong><p>{{ work.story }}</p><div v-for="panel in work.panels" :key="panel.id"><img v-if="panel.image && imageUrls[panel.image]" :src="imageUrls[panel.image]" :alt="panel.shot" /><p>{{ panel.action }}</p><p>{{ panel.dialogue }}</p></div></div><details><summary>查看完整快照数据</summary><pre>{{ side.json }}</pre></details></article></div></article>
+        <article v-for="entry in [...project.journal].reverse()" :key="entry.id" class="hubCard journalEntry"><small>{{ formatTime(entry.at) }}</small><h3>{{ entry.action }}</h3><p>{{ entry.reason || '本次未填写修改理由' }}</p><div class="tagList"><span v-for="section in entry.sections" :key="section">{{ sectionNames[section] || section }}</span></div><button class="textButton" @click="inspectRevision(entry.path)">展开修改前后</button><div v-if="revisionPath === entry.path" class="revisionView"><p v-if="revisionError" role="alert">{{ revisionError }}</p><article v-for="side in revisionSides" :key="side.label"><h4>{{ side.label }}</h4><pre class="revisionSummary">{{ side.summary }}</pre><div v-for="work in side.episodes" :key="work.id"><strong>{{ work.title }}</strong><p>{{ work.story }}</p><div v-for="panel in work.panels" :key="panel.id"><workspaceImage v-if="panel.image" :directory="directory" :path="panel.image" :alt="panel.shot" /><p>{{ panel.action }}</p><p>{{ panel.dialogue }}</p></div></div><details><summary>查看完整快照数据</summary><pre>{{ side.json }}</pre></details></article></div></article>
       </template>
       <template v-else>
-        <assetLibrary :project="project" :directory="directory" :disabled="disabled" :imageUrls="imageUrls" @save="emit('save')" />
+        <assetLibrary :project="project" :directory="directory" :disabled="disabled" @save="emit('save')" />
       </template>
     </fieldset>
   </section>
@@ -33,10 +33,11 @@ import { feedbackSchema, projectSchema } from "./model";
 import type { ComicProject } from "./model";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import saveFile from "@/lib/saveFile";
+import workspaceImage from "./workspaceImage.vue";
 import assetLibrary from "./assetLibrary.vue";
 import { zipSync, strToU8 } from "fflate";
 import { keywordInsights } from "./creatorInsights";
-const props = defineProps<{ section?: string; archiveOnly?: boolean; project: ComicProject; directory: string; disabled: boolean; canAnalyze: boolean; imageUrls: Record<string, string> }>();
+const props = defineProps<{ section?: string; archiveOnly?: boolean; project: ComicProject; directory: string; disabled: boolean; canAnalyze: boolean }>();
 const emit = defineEmits<{ save: []; analyze: [platform: string, window: string]; original: [direction: string] }>();
 const tabs = [{ id: "overview", label: "偏好与方向" }, { id: "feedback", label: "作品反馈" }, { id: "journal", label: "修改时间线" }, { id: "assets", label: "素材档案" }];
 const tab = ref(props.section || "overview");

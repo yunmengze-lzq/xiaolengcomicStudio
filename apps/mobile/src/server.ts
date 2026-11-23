@@ -2,12 +2,14 @@ import express from "express";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { resolve } from "node:path";
-import { mkdir, readFile, readdir, rm, writeAtomic } from "@toonflow/file";
+import { createWriteStream, mkdir, readFile, readdir, rm } from "@toonflow/file";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { getMissingBrowserFeatures } from "@toonflow/web/browserCapabilities";
 import { createRemoteConnection } from "@toonflow/server/remoteConnection";
 import { languageRequest, translateError, translateMessage } from "@toonflow/server/i18n";
 import { getRuntimePlatform, setRuntimeHost } from "@toonflow/server/platform";
-import config from "../../../electrobun.config";
+import { appVersion } from "../../../appConfig";
 
 const fromSource = import.meta.path.endsWith(".ts");
 const resources = fromSource ? resolve(import.meta.dirname, "../../../build") : import.meta.dirname;
@@ -21,7 +23,7 @@ let origin = "";
 setRuntimeHost("mobile");
 process.env.TOONFLOW_DATA_DIR = directory;
 await mkdir(exportDirectory, { recursive: true });
-const connection = await createRemoteConnection(directory, { deviceName: process.env.TOONFLOW_MOBILE_DEVICE_NAME || "Toonflow Android", appVersion: config.app.version });
+const connection = await createRemoteConnection(directory, { deviceName: process.env.TOONFLOW_MOBILE_DEVICE_NAME || "小冷漫画 Android", appVersion });
 // ACT: 临时导出不属于项目数据；应用被系统终止后，下次启动清理未完成的导出。
 for (const entry of await readdir(exportDirectory, { withFileTypes: true })) {
   if (entry.isFile() && exportId.test(entry.name)) await rm(resolve(exportDirectory, entry.name));
@@ -66,21 +68,37 @@ app.get("/", (request, response, next) => {
   // 旧内核无法解析检测函数时仍有 ES5 基线结果，让原生壳能够进入备用内核流程。
   const bridge = request.query.engine === "gecko"
     ? `<meta name="toonflowBrowserProbe"><script>document.querySelector('meta[name="toonflowBrowserProbe"]').content=JSON.stringify(window.toonflowBrowserProbe);</script>` : "";
-  response.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>Toonflow</title></head><body><script>window.toonflowBrowserProbe={missing:["Browser capability probe"],userAgent:navigator.userAgent};</script><script>window.toonflowBrowserProbe={missing:(${getMissingBrowserFeatures.toString()})(),userAgent:navigator.userAgent};</script>${bridge}</body></html>`);
+  response.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>小冷漫画</title></head><body><script>window.toonflowBrowserProbe={missing:["Browser capability probe"],userAgent:navigator.userAgent};</script><script>window.toonflowBrowserProbe={missing:(${getMissingBrowserFeatures.toString()})(),userAgent:navigator.userAgent};</script>${bridge}</body></html>`);
 });
 
 app.get("/api/mobile/runtime", (_request, response) => {
   response.json({ bun: Bun.version, platform: process.platform, arch: process.arch, environment: getRuntimePlatform() });
 });
-app.post("/api/mobile/exports", express.raw({ type: "application/octet-stream", limit: "100mb" }), async (request, response) => {
-  if (!Buffer.isBuffer(request.body)) {
+app.post("/api/mobile/exports", async (request, response) => {
+  if (!request.is("application/octet-stream")) {
     response.status(400).json({ message: translateMessage("导出内容必须是文件数据") });
     return;
   }
   const id = randomUUID();
   const path = resolve(exportDirectory, id);
-  await writeAtomic(path, request.body, { mode: 0o600 });
-  // ACT: 复用现有文件接口的 100 MB 上限；更大导出需改为流式暂存。
+  const limit = 100 * 1024 * 1024;
+  if (Number(request.get("content-length")) > limit) {
+    response.status(413).json({ message: translateMessage("导出文件不能超过 100 MB") });
+    return;
+  }
+  let size = 0;
+  const guard = new Transform({ transform(chunk: Buffer, _encoding, done) {
+    size += chunk.length;
+    if (size > limit) done(Object.assign(new Error("导出文件不能超过 100 MB"), { status: 413 }));
+    else done(null, chunk);
+  } });
+  try {
+    // ACT: 随机文件名只有写完后才返回，断开或超限时清掉半成品。
+    await pipeline(request, guard, createWriteStream(path, { flags: "wx", mode: 0o600 }));
+  } catch (error) {
+    await rm(path, { force: true });
+    throw error;
+  }
   setTimeout(() => { void rm(path, { force: true }).catch(console.error); }, 30 * 60 * 1000).unref();
   response.json({ url: `/api/mobile/exports/${id}` });
 });
@@ -107,7 +125,7 @@ if (connection.proxy) {
   const { createApp } = await import("@toonflow/server/app");
   toonflow = await createApp({
     webRoot: resolve(resources, "web"),
-    appVersion: config.app.version,
+    appVersion,
     dataDirectory: directory,
     toolsRoot: resolve(resources, "tools"),
     nodesRoot: resolve(resources, "nodes"),

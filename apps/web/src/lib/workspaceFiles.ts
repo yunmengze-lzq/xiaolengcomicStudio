@@ -8,7 +8,7 @@ type WorkspaceEntry = { name: string; path: string; type: "file" | "directory" }
 export type TextSnapshot = { text: string; revision: string; encoding: "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" };
 const client = axios.create({ baseURL: "/api/workspaces/files", headers: { "x-toonflow-workspace": "1" } });
 registerApiLanguage(client);
-const fileUrls = new Map<string, { directory: string; path: string; url: Promise<string>; users: number }>();
+const fileUrls = new Map<string, { directory: string; path: string; url: Promise<string>; users: number; controller: AbortController }>();
 
 function cachePath(path: string) {
   return path.replaceAll("\\", "/").split("/").filter(part => part && part !== ".").join("/").toLowerCase();
@@ -37,8 +37,8 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     return data.data;
   }
 
-  async function read(path: string) {
-    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory: getDirectory(), path }, responseType: "arraybuffer" });
+  async function read(path: string, signal?: AbortSignal) {
+    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory: getDirectory(), path }, responseType: "arraybuffer", signal });
     return data;
   }
 
@@ -57,9 +57,10 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     const key = JSON.stringify([directory, path, mimeType]);
     let entry = fileUrls.get(key);
     if (!entry) {
-      const url = client.get<Blob>("/read", { params: { directory, path }, responseType: "blob" })
+      const controller = new AbortController();
+      const url = client.get<Blob>("/read", { params: { directory, path }, responseType: "blob", signal: controller.signal })
         .then(({ data }) => URL.createObjectURL(mimeType ? new Blob([data], { type: mimeType }) : data));
-      entry = { directory, path, url, users: 0 };
+      entry = { directory, path, url, users: 0, controller };
       fileUrls.set(key, entry);
       const current = entry;
       void url.catch(() => { if (fileUrls.get(key) === current) fileUrls.delete(key); });
@@ -74,6 +75,7 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
         released = true;
         if (--current.users) return;
         if (fileUrls.get(key) === current) fileUrls.delete(key);
+        current.controller.abort();
         // 等待中的读取也要在最后一个使用者离开后释放，不撤销其他节点仍使用的 URL。
         void current.url.then(url => URL.revokeObjectURL(url), () => {});
       },

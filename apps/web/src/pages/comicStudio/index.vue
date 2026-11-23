@@ -69,6 +69,7 @@
 
     <div class="studioMain">
       <header class="studioHeader">
+        <button class="mobileProject" :disabled="!!busy || saving" aria-label="打开创作空间" @click="mobileProjectsVisible = true"><img src="/xiaolengMark.svg" alt="" /><span><small>小冷漫画</small><strong>{{ project?.title || '创作空间' }}</strong></span><icon-chevron-down :size="16" /></button>
         <div class="breadcrumb">
           {{ project?.title || "漫画创作工作台" }}
           <span>/</span>
@@ -84,6 +85,20 @@
         </div>
       </header>
 
+      <nav v-if="project" class="mobileContext" aria-label="当前工作区">
+        <template v-if="workspaceMode === 'studio'">
+          <button :disabled="mobileStageIndex === 0 || !!busy || saving" aria-label="上一步" @click="stage = workflowOrder[mobileStageIndex - 1]!"><icon-chevron-left :size="20" /></button>
+          <select aria-label="创作步骤" :value="workflowOrder[mobileStageIndex]" :disabled="!!busy || saving" @change="stage = Number(($event.target as HTMLSelectElement).value)"><option v-for="({ item, index }, position) in workflowStages" :key="index" :value="index" :disabled="position > 0 && !episode">{{ position + 1 }} / {{ workflowStages.length }}　{{ item.title }}</option></select>
+          <button :disabled="mobileStageIndex >= workflowOrder.length - 1 || !episode || !!busy || saving" aria-label="下一步" @click="stage = workflowOrder[mobileStageIndex + 1]!"><icon-chevron-right :size="20" /></button>
+        </template>
+        <template v-else-if="workspaceMode === 'analysis'">
+          <button :aria-pressed="analysisView === 'market'" @click="navigateSection('analysis', 'market')">市场热点</button><button :aria-pressed="analysisView === 'works'" @click="navigateSection('analysis', 'works')">作品表现</button>
+        </template>
+        <template v-else>
+          <button v-for="item in archiveTabs" :key="item.id" :aria-pressed="archiveView === item.id" @click="navigateSection('archive', item.id)">{{ item.label }}</button>
+        </template>
+      </nav>
+
       <main ref="studioContent" class="studioContent" :aria-busy="!!busy">
         <div v-if="lastError" class="previewWarning" role="alert">操作未完成：{{ lastError }}<button class="textButton" @click="lastError = ''">收起提示</button></div>
           <details v-if="project && workspaceMode !== 'analysis'" class="changeNote"><summary>修改说明与记录<span>{{ changeReason ? ' · 已填写' : ' · 选填' }}</span></summary><div class="changeReason"><label for="changeReason">这次为什么修改</label><input id="changeReason" v-model="changeReason" :disabled="!!busy || saving" maxlength="3000" placeholder="选填；下次保存时与前后快照一起留存" /><button class="textButton" @click="workspaceMode = 'archive'">查看修改记录</button></div></details>
@@ -91,9 +106,7 @@
           <span class="eyebrow">从一个话题，到一篇漫画</span>
           <h1>把灵感，放进格子里。</h1>
           <p>
-            在一个工作台完成选题、编剧、分镜、出图、排版和审稿。
-            <br />
-            让每个角色有自己的样子，让每期作品有据可循。
+            从剧情到分镜、气泡和导出，都在创作空间完成。
           </p>
           <button class="primaryButton" @click="newProjectVisible = true">
             <icon-plus :size="18" />
@@ -108,7 +121,7 @@
         </section>
 
         <analysisDashboard v-else-if="workspaceMode === 'analysis'" :key="directory" :project="project" :view="analysisView" :disabled="!!busy || saving" :status="analysisStatus" :automatic="collectionSettings.automatic" @collect="run('采集热点与作品数据', () => collectAnalysis())" @save="run('保存作品数据源', save)" @sync="(id) => run('同步作品数据', () => syncPublication(id))" @registered="(id) => run('登记并同步作品', async () => { await save(); if (project?.publications.find((item) => item.id === id)?.enabled) await syncPublication(id); })" @settings="openSettings('comicPlatforms')" @analyze="(platform, window) => run('AI分析作品数据', () => analyzeFeedback(platform, window))" @original="(direction) => run('创建原创选题', async () => { await startOriginal(direction); workspaceMode = 'studio'; })" />
-        <personalHub v-else-if="workspaceMode === 'archive'" :key="directory" :section="archiveView" :archiveOnly="true" :project="project" :directory="directory" :disabled="!!busy || saving" :imageUrls="imageUrls" :canAnalyze="textMode === 'codex' || !!textModel" @save="run('保存创作档案', save)" @original="(direction) => run('创建原创选题', async () => { await startOriginal(direction); workspaceMode = 'studio'; })" />
+        <personalHub v-else-if="workspaceMode === 'archive'" :key="directory" :section="archiveView" :archiveOnly="true" :project="project" :directory="directory" :disabled="!!busy || saving" :canAnalyze="textMode === 'codex' || !!textModel" @save="run('保存创作档案', save)" @original="(direction) => run('创建原创选题', async () => { await startOriginal(direction); workspaceMode = 'studio'; })" />
         <template v-else>
 
           <div v-if="generationProgress.active" class="generationStatus" role="status" aria-live="polite"><strong>{{ generationProgress.phase }}</strong><span>{{ generationProgress.model }} · 已用 {{ generationProgress.elapsedSeconds }} 秒</span><progress aria-label="图片生成处理中"></progress><small>模型未提供精确百分比；完成后会保存图片。重画结果先与旧版对比，再由你选择。</small></div>
@@ -129,9 +142,9 @@
               <template v-if="ideaMode === 'hot'">
               <section class="surface discoverySearch" aria-label="搜索灵感">
                 <div class="discoveryModeSwitch" role="group" aria-label="查找方式"><button :aria-pressed="discoverySearchMode === 'keyword'" @click="discoverySearchMode = 'keyword'">多平台搜索</button><button :aria-pressed="discoverySearchMode === 'trending'" @click="discoverySearchMode = 'trending'">平台热榜</button></div>
-                <template v-if="discoverySearchMode === 'keyword'"><label for="searchKeyword">一个关键词，查找多个平台的相关素材</label><div class="discoverySearchRow"><input id="searchKeyword" v-model="searchKeyword" maxlength="80" placeholder="职场反串、情侣嘴硬、生活冷知识……" @keydown.enter.prevent="searchInspirations" /><button class="primaryButton" :disabled="!searchKeyword.trim() || !discoveryPlatforms.length" @click="searchInspirations">搜索 {{ discoveryPlatforms.length }} 个平台</button></div><div class="platformPicks"><label v-for="item in discoverySources" :key="item.id" :class="{ picked: discoveryPlatforms.includes(item.id) }"><input v-model="discoveryPlatforms" type="checkbox" :value="item.id" />{{ item.label }}</label></div><p class="helperText">按勾选平台搜索同一主题。抖音、小红书、B站可使用本人登录会话；受限平台会单独说明，不影响其他结果。</p><div class="suggestedKeywords"><span>试试</span><button v-for="keyword in ['职场反串', '情侣嘴硬', 'MBTI趣谈', '生活冷知识']" :key="keyword" @click="searchKeyword = keyword">{{ keyword }}</button></div></template>
-                <template v-else><label for="sourceSelect">浏览一个平台的公开热榜</label><div class="discoverySearchRow"><select id="sourceSelect" v-model="source"><option value="douyin">抖音</option><option value="bilibili">B站</option><option value="xhsLocal">小红书 · 本人登录发现</option><option value="tieba">弱智吧</option><option value="douban">豆瓣</option><option value="ithome">IT之家</option><option value="solidot">Solidot</option></select><button class="primaryButton" @click="searchInspirations">读取当前平台</button></div><p class="helperText">此模式只读取上方选中的平台，不使用搜索关键词。小红书需本人登录，其余来源可能受公开访问限制。</p></template>
-                <div class="discoveryUtilities"><button class="textButton" @click="connectionsVisible = true">账号连接与状态</button><button class="textButton" @click="topicVisible = true">＋ 添加自己的来源</button><button v-if="project.researchPacks.length" class="textButton" @click="researchExpanded = !researchExpanded">{{ researchExpanded ? '收起' : '查看' }}素材与研究笔记</button></div><p v-if="sourceMessage || researchStatus" class="searchStatus" role="status">{{ sourceMessage }} {{ researchStatus }}</p>
+                <template v-if="discoverySearchMode === 'keyword'"><label for="searchKeyword">一个关键词，查找多个平台的相关素材</label><div class="discoverySearchRow"><input id="searchKeyword" v-model="searchKeyword" maxlength="80" placeholder="职场反串、情侣嘴硬、生活冷知识……" @keydown.enter.prevent="searchInspirations" /><button class="primaryButton" :disabled="!searchKeyword.trim() || !discoveryPlatforms.length" @click="searchInspirations">搜索 {{ discoveryPlatforms.length }} 个平台</button></div><div class="platformPicks"><label v-for="item in discoverySources" :key="item.id" :class="{ picked: discoveryPlatforms.includes(item.id) }"><input v-model="discoveryPlatforms" type="checkbox" :value="item.id" />{{ item.label }}</label></div><p class="helperText">{{ phoneLocal ? '搜索公开论坛线索。抖音、B站可在平台热榜浏览，也可手动粘贴任意平台的素材。' : '按勾选平台搜索同一主题；各平台的访问状态会分别显示。' }}</p><div class="suggestedKeywords"><span>试试</span><button v-for="keyword in ['职场反串', '情侣嘴硬', 'MBTI趣谈', '生活冷知识']" :key="keyword" @click="searchKeyword = keyword">{{ keyword }}</button></div></template>
+                <template v-else><label for="sourceSelect">浏览一个平台的公开热榜</label><div class="discoverySearchRow"><select id="sourceSelect" v-model="source"><option value="douyin">抖音</option><option value="bilibili">B站</option><option v-if="!phoneLocal" value="xhsLocal">小红书 · 本人登录发现</option><option value="tieba">弱智吧</option><option value="douban">豆瓣</option><option value="ithome">IT之家</option><option value="solidot">Solidot</option></select><button class="primaryButton" @click="searchInspirations">读取当前平台</button></div><p class="helperText">只读取当前平台。公开来源可能受平台访问限制。</p></template>
+                <div class="discoveryUtilities"><button v-if="!phoneLocal" class="textButton" @click="connectionsVisible = true">账号连接与状态</button><button class="textButton" @click="topicVisible = true">＋ 添加自己的来源</button><button v-if="project.researchPacks.length" class="textButton" @click="researchExpanded = !researchExpanded">{{ researchExpanded ? '收起' : '查看' }}素材与研究笔记</button></div><p v-if="sourceMessage || researchStatus" class="searchStatus" role="status">{{ sourceMessage }} {{ researchStatus }}</p>
               </section>
               <section v-if="project.topics.length" class="surface adaptationBar"><div><h3>把素材整理成创作方向</h3><p class="helperText">搜索只采集真实线索。下面的操作才调用文本模型，生成原创提案。</p></div><label>内容方向<select v-model="discoveryMode"><option value="satire">喜剧</option><option value="science">科普</option><option value="drama">情感剧情</option></select></label><label>内容语气<select v-model="discoveryTone"><option value="">自然表达</option><option v-for="tone in ['反串', '冷幽默', '毒舌', '温柔治愈', '轻松讲解']" :key="tone">{{ tone }}</option></select></label><button class="primaryButton" @click="run('整理原创提案', () => discoverMemes(true))">生成创作提案</button></section>
               <researchDesk v-if="researchExpanded" :embedded="true" v-model:keyword="researchKeyword" :project="project" :disabled="!!busy || saving" :status="researchStatus" @collect="(keyword, platforms) => run('多平台收集专题素材', () => collectResearch(keyword, platforms))" @save="run('保存研究笔记', save)" @use="(id) => run('采用专题素材包', () => useResearchPack(id))" @detail="(packId, topicId) => run('读取笔记正文', () => readResearchSource(packId, topicId))" />
@@ -160,7 +173,7 @@
                         rel="noopener noreferrer">
                         查看原梗线索
                       </a>
-                      <button class="textButton" @click="researchTopic(idea.hook)">多平台研究这个梗</button><button class="primaryButton" @click="run('采用剧情梗', () => selectMeme(idea))">
+                      <button class="textButton" @click="researchTopic(idea.hook)">搜索相关素材</button><button class="primaryButton" @click="run('采用剧情梗', () => selectMeme(idea))">
                         用这个方向写漫画
                         <icon-arrow-right :size="15" />
                       </button>
@@ -218,7 +231,7 @@
               <div v-if="!episode.topic.verified" class="writingNotice"><span>{{ hasOnlyTopicClue ? '当前只有热点线索，请先确定如何使用。' : '来源尚未核对，请选择创作方式。' }}</span><button class="textButton" @click="useTopicAsInspiration">只借关键词写原创</button><button class="textButton" @click="scriptSourceOpen = true">补充并核对来源</button></div>
               <p v-if="scriptIssue" class="scriptIssue" role="alert">{{ scriptIssue }}</p>
               <div class="writingColumns">
-                <div class="surface manuscript"><div class="sectionTitle"><h3>故事正文</h3><span>{{ episode.story.length }} 字 · 可直接编辑</span></div><label for="episodeTitle">作品标题</label><input id="episodeTitle" v-model="episode.title" maxlength="200" /><label for="story">正文与角色对话</label><textarea id="story" v-model="episode.story" class="storyEditor" rows="18" placeholder="写下故事和人物对话，也可以在右侧设置方向后使用 AI 创作。" /><p class="helperText">正文与分镜分别保存。修改正文后，已有分镜不会自动覆盖。</p></div>
+                <div class="surface manuscript"><div class="sectionTitle"><h3>故事正文</h3><span>{{ episode.story.length }} 字 · 可直接编辑</span></div><label for="episodeTitle">作品标题</label><input id="episodeTitle" v-model="episode.title" maxlength="200" /><label for="story">正文与角色对话</label><textarea id="story" v-model="episode.story" class="storyEditor" rows="18" placeholder="写下故事和人物对话，也可以选择创作方向后使用 AI 创作。" /><p class="helperText">正文与分镜分别保存。修改正文后，已有分镜不会自动覆盖。</p></div>
                 <aside class="writingInspector">
                   <section class="surface"><h3>创作方向</h3><label for="storyMode">这篇靠什么吸引读者？</label><select id="storyMode" v-model="episode.storyMode"><option value="satire">反串喜剧 · 抬杠、递进与回扣</option><option value="science">科普教学 · 原理、例子与边界</option><option value="drama">情感剧情 · 动机、潜台词与细节</option></select><label for="targetPanels">计划长度 · {{ episode.targetPanels }} 格</label><input id="targetPanels" v-model.number="episode.targetPanels" type="range" min="2" max="12" /><label for="direction">补充要求</label><textarea id="direction" v-model="episode.direction" rows="3" placeholder="你想要的笑点、知识点或情感变化……" />
                   <button class="primaryButton writeAction" @click="requestStory"><icon-sparkles :size="16" />{{ episode.story.trim() ? '整理脚本与人物清单' : '生成脚本与人物清单' }}</button><p class="helperText">{{ episode.panels.length ? '重新生成前会确认，并保留历史快照。' : '点击才调用文本模型，也可以手动添加分镜。' }}</p>
@@ -251,7 +264,7 @@
             </section>
 
             <section v-else-if="stage === 2 && episode">
-              <header class="productionHeader"><div><h2>把故事安排成画面</h2><p>{{ episode.panels.length }} 格 · 点击左侧画格，编辑场景、出场人物和台词。</p></div><div class="panelActions"><button class="textButton" @click="stage = 3">← 返回角色绑定</button><button class="primaryButton" :disabled="!episode.panels.length" @click="stage = 4">进入漫画制作 →</button></div></header>
+              <header class="productionHeader"><div><h2>把故事安排成画面</h2><p>{{ episode.panels.length }} 格 · 选择画格，编辑场景、出场人物和台词。</p></div><div class="panelActions"><button class="textButton" @click="stage = 3">← 返回角色绑定</button><button class="primaryButton" :disabled="!episode.panels.length" @click="stage = 4">进入漫画制作 →</button></div></header>
               <div class="boardGenerate"><p>{{ episode.panels.length ? '修改脚本或角色绑定后，可重新生成分镜；已有图片与版本先备份。' : '角色绑定完成后，按最终人物姓名和性格生成画面与对白。' }}</p><button class="primaryButton" :disabled="!!unboundScriptRoles.length" @click="run('按绑定角色生成分镜，请稍候…', () => generateStory('storyboard'))">{{ episode.panels.length ? '重新生成分镜' : '生成分镜' }}</button></div>
               <details class="surface boardStory"><summary>对照故事正文 · {{ episode.title }}</summary><p>{{ episode.story || '还没有正文，可返回脚本编写。' }}</p></details>
               <div class="boardWorkspace">
@@ -307,17 +320,17 @@
                 <article v-for="(name, roleIndex) in storySpeakers" :key="name" class="roleCastingRow">
                   <div class="scriptPerson"><small>剧本人物 {{ String(roleIndex + 1).padStart(2, '0') }}</small><h4>{{ name }}</h4><p>{{ episode.scriptRoles.find(role => role.name === name)?.personality || episode.scriptRoles.find(role => role.name === name)?.description || '选择适合这个人物的形象与性格' }}</p></div>
                   <span class="castingArrow" aria-hidden="true">→</span>
-                  <div class="castPerson"><img v-if="boundPerson(name)?.image && imageUrls[boundPerson(name)!.image]" :src="imageUrls[boundPerson(name)!.image]" :alt="boundPerson(name)?.name" /><span v-else class="castPlaceholder">{{ castForSpeaker(name) ? '暂无预览' : '待选择' }}</span><div><strong>{{ boundPerson(name)?.name || '尚未绑定形象' }}</strong><p>{{ boundPerson(name)?.personality || (castForSpeaker(name) ? '可展开微调本篇性格' : '从公共角色库选择，也可以新建') }}</p><div class="panelActions"><button class="secondaryButton" @click="bindingTarget = name">{{ castForSpeaker(name) ? '更换形象' : '选择形象' }}</button><button v-if="castForSpeaker(name)" class="textButton" :aria-label="`取消${name}的绑定`" @click="run('取消角色绑定', () => assignStoryRole(name, ''))">取消绑定</button></div></div></div>
+                  <div class="castPerson"><workspaceImage v-if="boundPerson(name)?.image" :directory="directory" :path="boundPerson(name)!.image" :alt="boundPerson(name)!.name" /><span v-else class="castPlaceholder">{{ castForSpeaker(name) ? '暂无预览' : '待选择' }}</span><div><strong>{{ boundPerson(name)?.name || '尚未绑定形象' }}</strong><p>{{ boundPerson(name)?.personality || (castForSpeaker(name) ? '可展开微调本篇性格' : '从公共角色库选择，也可以新建') }}</p><div class="panelActions"><button class="secondaryButton" @click="bindingTarget = name">{{ castForSpeaker(name) ? '更换形象' : '选择形象' }}</button><button v-if="castForSpeaker(name)" class="textButton" :aria-label="`取消${name}的绑定`" @click="run('取消角色绑定', () => assignStoryRole(name, ''))">取消绑定</button></div></div></div>
                   <details v-if="boundPerson(name)" class="roleTweaks"><summary>微调本篇性格与称呼</summary><label>性格与习惯<textarea :value="boundPerson(name)?.personality" maxlength="1500" rows="2" @change="run('保存本篇性格', () => updateBoundPerson(name, 'personality', ($event.target as HTMLTextAreaElement).value))" /></label><label>其他称呼<input :value="boundPerson(name)?.aliases" maxlength="500" placeholder="用逗号分隔" @change="run('同步人物称呼', () => updateBoundPerson(name, 'aliases', ($event.target as HTMLInputElement).value))" /></label><p class="helperText">只修改本篇设定。性格用于后续生成；已有图片不会自动重绘。</p></details>
                 </article>
                 <p class="helperText">{{ episode.panels.length ? '更换形象会同步已有分镜的人物与姓名；已有图片需重新绘制。逐格出场、动作和台词请在分镜设计调整。' : '绑定完成后，进入分镜设计，让角色的性格参与动作和对白生成。' }}</p>
               </section>
               <p v-if="artTab === 'characters' && !storySpeakers.length" class="helperText">先在“选题与脚本”生成剧本人物清单，再回来绑定形象；也可以先准备公共角色。</p>
               <el-dialog :model-value="!!bindingTarget" :title="`为「${bindingTarget}」选择形象`" width="min(1000px, 94vw)" @update:model-value="value => { if (!value) bindingTarget = ''; }">
-                <artLibrary v-if="bindingTarget" :selectionLabel="`绑定给${bindingTarget}`" hideSelectionTray :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyBoundLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
+                <artLibrary v-if="bindingTarget" :selectionLabel="`绑定给${bindingTarget}`" hideSelectionTray :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyBoundLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedDirectory="directory" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" />
               </el-dialog>
-              <details v-if="artTab === 'characters' && storySpeakers.length" class="surface"><summary>管理公共角色库 · 新建、编辑与复用</summary><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></details>
-              <template v-else><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedUrls="imageUrls" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></template>
+              <details v-if="artTab === 'characters' && storySpeakers.length" class="surface" @toggle="manageArtLibrary = ($event.target as HTMLDetailsElement).open"><summary>管理公共角色库 · 新建、编辑与复用</summary><artLibrary v-if="manageArtLibrary" :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedDirectory="directory" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></details>
+              <template v-else><artLibrary :kind="artTab === 'characters' ? 'characters' : 'styles'" :imageModel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)" :requestImage="requestImage" :apply="applyLibraryItem" :selectedItems="artTab === 'characters' ? episode?.castSnapshot || project.characters : episode?.styleSnapshot ? [episode.styleSnapshot] : activeStyle ? [activeStyle] : []" :selectedDirectory="directory" :activeStyleId="episode?.styleSnapshot?.id || project.activeStyleId" :remove="removeLibraryItem" :analyzeDesign="analyzeLibrary" :analysisLabel="analysisServiceLabel" /></template>
               <p v-if="episode?.styleSnapshot" class="helperText">本篇画风：{{ episode.styleSnapshot.name }}。换画风用于后续生成，已有图片需重新绘制。{{ episode.panels.some((panel) => panel.imagePromptOverride) ? '注意：部分分格使用自定义提示词，会覆盖自动整理的画风描述，请在分格出图中检查。' : '' }}</p>
               <div class="surface modelDisclosure"><strong>设计出图：{{ imageModels.find(item => `${item.providerId}/${item.modelId}` === imageModel)?.label || '未选择' }}</strong><p>图片分析：{{ referenceAnalysisMode === 'codex' ? 'Codex CLI' : referenceAnalysisMode === 'api' ? textModels.find(item => `${item.providerId}/${item.modelId}` === referenceModel)?.label || '未选择' : textServiceLabel }}</p><button class="secondaryButton" @click="openSettings()">更换模型 / 配置服务</button><p class="helperText">参考图会传给支持图片输入的服务；人物一致性仍取决于所选模型和工作流，不保证自动锁定。</p></div>
             </section>
@@ -345,16 +358,16 @@
                 </button>
               </div>
               </details>
-              <directPageEditor :beforeRemove="backupEpisode" v-if="episode.productionMode === 'direct'" :episode="episode" :imageUrls="imageUrls" :busy="!!busy" :progress="generationProgress" :generationIssue="productionIssue" @generateAll="run('连续生成漫画页', generateDirectPages)" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
+              <directPageEditor :directory="directory" :beforeRemove="backupEpisode" v-if="episode.productionMode === 'direct'" :episode="episode" :busy="!!busy" :progress="generationProgress" :generationIssue="productionIssue" @generateAll="run('连续生成漫画页', generateDirectPages)" @import="(page, file) => run('导入整页漫画', () => adoptImage(page, file, directPageInput(episode!, page).fingerprint, true))" @generate="page => run('生成整页漫画', () => generateDirectPage(page))" @resolve="(page, accept) => run('保存整页版本', () => resolveDirectPage(page, accept))" />
               <template v-else>
               <div class="productionSteps"><strong>1 绘制画面 · {{ episode.panels.filter(panel => panel.image).length }}/{{ episode.panels.length }}</strong><button class="textButton" @click="letteringPanel = drawingPanel; stage = 5">2 拼页与气泡 →</button><span>每次绘制一格无字画面，台词在下一步排版。</span></div>
               <div v-if="!episode.panels.length" class="surface productionEmpty"><h3>还没有可绘制的画格</h3><p>先完成故事和分镜，再回来生成画面。</p><button class="primaryButton" @click="stage = 2">前往分镜设计</button></div>
               <div v-else class="panelWorkspace">
-              <button class="productionListToggle" :aria-expanded="showProductionPages" @click="showProductionPages = !showProductionPages">画格列表 · {{ episode.panels.length }} 格 {{ showProductionPages ? "收起" : "展开" }}</button><div :class="{ collapsed: !showProductionPages }" class="letteringTabs drawingTabs" aria-label="选择要绘制的画面"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: drawingPanel === index }" :aria-pressed="drawingPanel === index" @click="drawingPanel = index"><img v-if="panel.image" :src="imageUrls[panel.image]" alt="" /><span>第 {{ index + 1 }} 格 · {{ panel.image ? '已有图' : '待生成' }}</span></button></div>
+              <button class="productionListToggle" :aria-expanded="showProductionPages" @click="showProductionPages = !showProductionPages">画格列表 · {{ episode.panels.length }} 格 {{ showProductionPages ? "收起" : "展开" }}</button><div :class="{ collapsed: !showProductionPages }" class="letteringTabs drawingTabs" aria-label="选择要绘制的画面"><button v-for="(panel, index) in episode.panels" :key="panel.id" :class="{ selected: drawingPanel === index }" :aria-pressed="drawingPanel === index" @click="drawingPanel = index"><workspaceImage v-if="panel.image" :directory="directory" :path="panel.image" alt="" /><span>第 {{ index + 1 }} 格 · {{ panel.image ? '已有图' : '待生成' }}</span></button></div>
               <div class="imageGrid singlePanelGrid">
                 <article v-for="(panel, index) in episode.panels" v-show="drawingPanel === index" :key="panel.id" class="imageCard">
                   <div class="panelArt">
-                    <img v-if="panel.image" :src="imageUrls[panel.image]" :alt="`第${index + 1}格漫画`" />
+                    <workspaceImage v-if="panel.image" :directory="directory" :path="panel.image" :alt="`第${index + 1}格漫画`" />
                     <span v-else>
                       <icon-photo :size="32" />
                       等待第 {{ index + 1 }} 格出图
@@ -414,7 +427,7 @@
 
             <compositionWorkspace v-model:panelIndex="letteringPanel" v-else-if="stage === 5 && episode" :key="episode.id" :episode="episode" :files="files" :previewUrls="previewUrls" @draw="stage = 4" @preview="stage = 6" @remove="removeStoryboardPanel" />
 
-            <publicationWorkspace v-else-if="(stage === 6 || stage === 7) && episode" :key="episode.id" :episode="episode" :previewUrls="previewUrls" :previewMessage="previewMessage" @edit="stage = episode.productionMode === 'direct' ? 4 : 5" @refresh="run('刷新预览', preview)" @full="largePreviewVisible = true" @images="run('导出成品图片', exportImages)" @package="run('导出发布包', exportPackage)" @generatePost="run('生成发布文案候选', generatePost)" @save="run('保存发布记录', save)" />
+            <publicationWorkspace v-model:selectedPage="previewPage" :previewCount="previewCount" v-else-if="(stage === 6 || stage === 7) && episode" :key="episode.id" :episode="episode" :previewUrls="previewUrls" :previewMessage="previewMessage" @edit="stage = episode.productionMode === 'direct' ? 4 : 5" @refresh="run('刷新预览', preview)" @full="largePreviewVisible = true" @images="run('导出成品图片', exportImages)" @current="run('导出当前漫画页', () => exportImages(true))" @package="run('导出发布包', exportPackage)" @generatePost="run('生成发布文案候选', generatePost)" @save="run('保存发布记录', save)" />
 
             <section v-else class="stageNotice">
               <icon-file-description :size="32" />
@@ -428,6 +441,18 @@
         </template>
       </main>
     </div>
+
+    <nav class="mobileNav" aria-label="主导航">
+      <button :disabled="!!busy" :aria-current="workspaceMode === 'studio' ? 'page' : undefined" @click="navigateSection('studio', '')"><icon-stack-2 :size="22" />创作</button>
+      <button :disabled="!project || !!busy" :aria-current="workspaceMode === 'analysis' ? 'page' : undefined" @click="navigateSection('analysis', 'market')"><icon-chart-bar :size="22" />数据</button>
+      <button :disabled="!project || !!busy" :aria-current="workspaceMode === 'archive' ? 'page' : undefined" @click="navigateSection('archive', 'assets')"><icon-bookmarks :size="22" />档案</button>
+      <button @click="openSettings('comicDefaults')"><icon-adjustments :size="22" />设置</button>
+    </nav>
+
+    <el-dialog v-model="mobileProjectsVisible" title="创作空间" width="min(460px, 94vw)" alignCenter>
+      <div class="mobileProjectList"><button v-for="item in comicProjects" :key="item.directory" :aria-current="item.directory === directory ? 'true' : undefined" @click="chooseMobileProject(item.directory)">{{ item.name }}<icon-check v-if="item.directory === directory" :size="17" /></button></div>
+      <template #footer><div class="mobileProjectActions"><button v-if="project || archivedProjects.length" class="secondaryButton" @click="mobileProjectsVisible = false; spaceName = project?.title || ''; spaceManageVisible = true">管理空间</button><button class="primaryButton" @click="mobileProjectsVisible = false; newProjectVisible = true"><icon-plus :size="17" />新建空间</button></div></template>
+    </el-dialog>
 
     <el-dialog v-model="spaceManageVisible" class="platformDialog" title="管理创作空间" width="min(540px, 94vw)" alignCenter><div v-if="project"><label for="spaceName">当前空间名称</label><input id="spaceName" v-model="spaceName" class="dialogInput" maxlength="100" /><div class="panelActions"><button class="primaryButton" :disabled="!!busy || saving || !spaceName.trim()" @click="run('修改空间名称', () => renameSpace(spaceName))">保存名称</button><button class="secondaryButton" :disabled="!!busy || saving" @click="run('删除空间', deleteSpace)">删除当前空间 · 可恢复</button></div></div><h3>已删除空间 · {{ archivedProjects.length }}</h3><p>仅移出列表，作品和图片仍在本机。恢复后可以继续创作。</p><div v-for="item in archivedProjects" :key="item.directory" class="panelActions"><span>{{ item.name }}</span><button class="secondaryButton" :disabled="!!busy || saving" @click="run('恢复空间', async () => { await restoreSpace(item.directory); spaceName = project?.title || ''; })">恢复空间</button></div></el-dialog>
     <el-dialog v-model="newProjectVisible" class="platformDialog" title="新建漫画项目" width="min(460px, 92vw)" alignCenter>
@@ -453,12 +478,12 @@
         <button class="primaryButton" :disabled="!topicDraft.title.trim() || (!topicDraft.original && !safeLink(topicDraft.url)) || !!busy" @click="addTopic">保存话题</button>
       </template>
     </el-dialog>
-    <el-dialog v-model="largePreviewVisible" class="platformDialog" title="小冷漫画 · 成品大图" width="min(900px, 94vw)" alignCenter><img v-for="(url, index) in previewUrls" :key="url" :src="url" :alt="`完整成品第 ${index + 1} 页`" style="width: 100%; height: auto; display: block; margin-bottom: 16px" /></el-dialog>
-    <el-dialog v-model="comparisonVisible" class="platformDialog" title="重画对比 · 两版都会保留" width="min(1000px, 94vw)" alignCenter><template v-if="comparisonPanel"><p>检查动作由谁执行、角色数量、服装与道具。采用版本后需重新审稿；这里不会再次调用模型。</p><div class="imageComparison"><figure v-for="side in ['left', 'right'] as const" :key="side"><label :for="`comparison${side}`">{{ side === 'left' ? '左侧版本' : '右侧版本' }}</label><select :id="`comparison${side}`" :value="side === 'left' ? comparisonLeft : comparisonRight" @change="side === 'left' ? comparisonLeft = ($event.target as HTMLSelectElement).value : comparisonRight = ($event.target as HTMLSelectElement).value"><option v-for="(path, version) in comparisonPanel.history" :key="path" :value="path">版本 {{ version + 1 }}{{ comparisonPanel.image === path ? ' · 当前采用' : comparisonPanel.candidate?.path === path ? ' · 新版候选' : '' }}</option></select><img :src="imageUrls[side === 'left' ? comparisonLeft : comparisonRight]" :alt="side === 'left' ? '左侧漫画版本' : '右侧漫画版本'" /><button :disabled="!!busy || saving" class="primaryButton" @click="run('选择漫画版本', () => useComparedVersion(side === 'left' ? comparisonLeft : comparisonRight))">采用{{ side === 'left' ? '左侧' : '右侧' }}版本</button></figure></div><button v-if="comparisonPanel.candidate" :disabled="!!busy || saving" class="secondaryButton" @click="run('保留旧版', async () => { await resolveCandidate(comparisonPanel!, false); comparisonVisible = false; })">保留当前旧版</button></template></el-dialog>
+    <el-dialog v-model="largePreviewVisible" class="platformDialog" title="小冷漫画 · 成品大图" width="min(900px, 94vw)" alignCenter><img v-if="largePreviewVisible && previewUrls[previewPage]" :src="previewUrls[previewPage]" :alt="`完整成品第 ${previewPage + 1} 页`" style="width: 100%; height: auto; display: block" /></el-dialog>
+    <el-dialog v-model="comparisonVisible" class="platformDialog" title="重画对比 · 两版都会保留" width="min(1000px, 94vw)" alignCenter><template v-if="comparisonPanel"><p>检查动作由谁执行、角色数量、服装与道具。采用版本后需重新审稿；这里不会再次调用模型。</p><div class="imageComparison"><figure v-for="side in ['left', 'right'] as const" :key="side"><label :for="`comparison${side}`">{{ side === 'left' ? '左侧版本' : '右侧版本' }}</label><select :id="`comparison${side}`" :value="side === 'left' ? comparisonLeft : comparisonRight" @change="side === 'left' ? comparisonLeft = ($event.target as HTMLSelectElement).value : comparisonRight = ($event.target as HTMLSelectElement).value"><option v-for="(path, version) in comparisonPanel.history" :key="path" :value="path">版本 {{ version + 1 }}{{ comparisonPanel.image === path ? ' · 当前采用' : comparisonPanel.candidate?.path === path ? ' · 新版候选' : '' }}</option></select><workspaceImage v-if="comparisonVisible" :directory="directory" :path="side === 'left' ? comparisonLeft : comparisonRight" :alt="side === 'left' ? '左侧漫画版本' : '右侧漫画版本'" /><button :disabled="!!busy || saving" class="primaryButton" @click="run('选择漫画版本', () => useComparedVersion(side === 'left' ? comparisonLeft : comparisonRight))">采用{{ side === 'left' ? '左侧' : '右侧' }}版本</button></figure></div><button v-if="comparisonPanel.candidate" :disabled="!!busy || saving" class="secondaryButton" @click="run('保留旧版', async () => { await resolveCandidate(comparisonPanel!, false); comparisonVisible = false; })">保留当前旧版</button></template></el-dialog>
     <settings v-model="settingsVisible" v-model:panel="settingsPanel" :comicStudio="true">
       <template #comicOverview><settingsOverview :textMode="textMode" :textLabel="textModels.find((item) => `${item.providerId}/${item.modelId}` === textModel)?.label || ''" :imageLabel="imageModels.find((item) => `${item.providerId}/${item.modelId}` === imageModel)?.label || ''" :codexModel="codexModel" :automatic="collectionSettings.automatic" :intervalMinutes="collectionSettings.intervalMinutes" @navigate="settingsPanel = $event" /></template>
       <template #comicDefaults><modelTasks v-model:textMode="textMode" v-model:textModel="textModel" v-model:imageModel="imageModel" v-model:referenceAnalysisMode="referenceAnalysisMode" v-model:referenceModel="referenceModel" v-model:codexModel="codexModel" v-model:textEffort="textEffort" :textModels="textModels" :imageModels="imageModels" :modelChecking="modelChecking" :modelProbeMessage="modelProbeMessage" :refreshModels="loadModels" @configure="openSettings" @probe="probeTextModel" /></template>
-      <template #comicPlatforms>      <div class="connectionContent">
+      <template #comicPlatforms><div v-if="phoneLocal" class="comicSettings"><p>在「找剧本」浏览公开热榜，或添加自己在平台看到的链接与素材。平台账号登录采集可在桌面版使用。</p></div><div v-else class="connectionContent">
         <p>按平台连接一次，之后回到选题页使用。你不需要手工查找或粘贴 Cookie。</p>
         <platformAccounts :disabled="!!busy || saving" @collected="(items) => run('收集本人浏览器内容', async () => { if (!project) throw new Error('请先选择创作空间'); const topics = projectSchema.shape.topics.parse(items.map((item) => ({ ...(item as object), id: newTopicId(), verified: false }))); project.topics = [...topics, ...project.topics.filter((old) => !topics.some((item) => old.url === item.url))].slice(0, 1000); await save(); settingsVisible = false; stage = 0; workspaceMode = 'studio'; })" />
         <section class="connectionCard">
@@ -482,6 +507,7 @@
 </template>
 
 <script setup lang="ts">
+import workspaceImage from "./workspaceImage.vue";
 import directPageEditor from "./directPageEditor.vue";
 import { productionReady, directPageInput, bindStoryName } from "./model";
 import { computed, onMounted, onBeforeUnmount, ref, reactive, watch, nextTick } from "vue";
@@ -502,6 +528,8 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconChevronRight,
+  IconChevronLeft,
+  IconChevronDown,
   IconPlus,
   IconCheck,
   IconAdjustments,
@@ -523,6 +551,7 @@ import {
   IconFileDescription,
 } from "@tabler/icons-vue";
 import settings from "@/components/settings/index.vue";
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 import useStudio from "./useStudio";
 import publicationWorkspace from "./publicationWorkspace.vue";
 import compositionWorkspace from "./compositionWorkspace.vue";
@@ -543,9 +572,10 @@ import type { Panel, Character, ArtStyle, Episode } from "./model";
 const newTopicId = () => crypto.randomUUID();
 const researchKeyword = ref("");
 const ideaMode = ref("hot");
-const discoverySearchMode = ref<"keyword" | "trending">("keyword");
+const phoneLocal = isMobile && !isRemoteMobile;
+const discoverySearchMode = ref<"keyword" | "trending">(phoneLocal ? "trending" : "keyword");
 const researchExpanded = ref(false);
-const discoverySources = [{ id: "douyin", label: "抖音" }, { id: "xhsLocal", label: "小红书" }, { id: "bilibili", label: "B站" }, { id: "tieba", label: "弱智吧" }, { id: "douban", label: "豆瓣" }] as const;
+const discoverySources = ([{ id: "douyin", label: "抖音" }, { id: "xhsLocal", label: "小红书" }, { id: "bilibili", label: "B站" }, { id: "tieba", label: "弱智吧" }, { id: "douban", label: "豆瓣" }] as const).filter(item => !phoneLocal || item.id === 'tieba' || item.id === 'douban');
 function searchInspirations() {
   if (busy.value) return;
   if (discoverySearchMode.value === "keyword") {
@@ -564,7 +594,8 @@ const analysisView = computed({ get: () => route.query.panel === "works" ? "work
 const archiveTabs = [{ id: "overview", label: "创作偏好", icon: IconHeart }, { id: "journal", label: "修改记录", icon: IconHistory }, { id: "assets", label: "素材库", icon: IconBookmarks }];
 const archiveView = computed({ get: () => archiveTabs.some((item) => item.id === route.query.panel) ? String(route.query.panel) : "overview", set: (value: string) => { void router.replace({ query: { ...route.query, panel: value } }); } });
 function navigateSection(workspace: string, panel: string) {
-  void router.replace({ query: { ...route.query, workspace, panel } });
+  const target = { query: { ...route.query, workspace, panel } };
+  void (isMobile && workspace !== workspaceMode.value ? router.push(target) : router.replace(target));
 }
 const sidebarCollapsed = ref(false);
 const expandedSections = reactive(new Set([workspaceMode.value]));
@@ -612,8 +643,10 @@ const {
   dirty,
   episode,
   activeStyle,
-  imageUrls,
   previewUrls,
+  previewCount,
+  previewPage,
+  previewActive,
   previewMessage,
   studioTheme,
   studioAccent,
@@ -681,7 +714,6 @@ const {
   exportPackage,
   exportImages,
   analyzeLibrary,
-  ensureImage,
 } = useStudio();
 const comparisonVisible = ref(false);
 const comparisonPanel = ref<Panel | null>(null);
@@ -773,7 +805,9 @@ const stages = [
 ];
 const workflowOrder = [0, 1, 3, 2, 4, 6];
 const workflowStages = computed(() => workflowOrder.map(index => ({ index, item: stages[index]! })));
+const mobileStageIndex = computed(() => workflowOrder.indexOf(stage.value === 5 ? 4 : stage.value === 7 ? 6 : stage.value));
 const comicProjects = computed(() => workspace.projectList.filter((item) => isComicDirectory(item.directory) || item.directory === directory.value));
+const mobileProjectsVisible = ref(false);
 const newProjectVisible = ref(false);
 const newProjectTitle = ref("");
 const topicVisible = ref(false);
@@ -794,7 +828,7 @@ watch([workspaceMode, () => project.value?.title], maybeCollect);
 onMounted(() => { collectionTimer = setInterval(maybeCollect, 60000); });
 onBeforeUnmount(() => clearInterval(collectionTimer));
 const letteringPanel = ref(0);
-const showProductionPages = ref(true);
+const showProductionPages = ref(!isMobile);
 const storyboardPanelId = ref("");
 watch(() => episode.value?.panels.map(panel => panel.id).join(","), () => {
   if (!episode.value?.panels.some(panel => panel.id === storyboardPanelId.value)) storyboardPanelId.value = episode.value?.panels[0]?.id || "";
@@ -821,6 +855,10 @@ const drawingPanel = ref(0);
 watch(() => episode.value?.id, () => { drawingPanel.value = 0; });
 watch([stage, () => episode.value?.productionMode], () => { if (stage.value === 5 && episode.value?.productionMode === "direct") stage.value = 4; });
 const largePreviewVisible = ref(false);
+const syncPreviewVisibility = () => { previewActive.value = workspaceMode.value === "studio" && !document.hidden; };
+watch(workspaceMode, syncPreviewVisibility, { immediate: true });
+onMounted(() => document.addEventListener("visibilitychange", syncPreviewVisibility));
+onBeforeUnmount(() => document.removeEventListener("visibilitychange", syncPreviewVisibility));
 watch(() => episode.value?.id, () => { letteringPanel.value = 0; });
 const studioColors = computed(() => ({ "--studioAccent": uiSettings.value.primaryColor, fontSize: `${14 * uiSettings.value.fontScale / 100}px` }));
 const artTab = ref<"characters" | "styles">("characters");
@@ -862,6 +900,12 @@ function createNamedProject() {
 function switchProject(event: Event) {
   const path = (event.target as HTMLSelectElement).value;
   if (path) void run("读取漫画项目", () => openProject(path)).then(maybeCollect);
+}
+async function chooseMobileProject(path: string) {
+  mobileProjectsVisible.value = false;
+  if (path === directory.value) return;
+  await run("读取漫画项目", () => openProject(path));
+  if (directory.value === path) navigateSection("studio", "");
 }
 function addTopic() {
   void run("保存话题来源", async () => {
@@ -940,7 +984,6 @@ async function reuseReference(event: Event, refs: ArtStyle["refs"], maximum = 12
     if (!asset || refs.some((item) => item.path === path)) return;
     if (refs.length >= maximum) throw new Error("参考图数量已达上限，请先移除不需要的参考");
     refs.push({ id: crypto.randomUUID(), path, source: asset.source, license: asset.license, note: "" });
-    await ensureImage(path);
     await save();
   });
 }
@@ -991,6 +1034,7 @@ async function assignStoryRole(name: string, id: string) {
   await save();
 }
 const bindingTarget = ref("");
+const manageArtLibrary = ref(false);
 watch(() => episode.value?.id, () => { bindingTarget.value = ""; });
 function boundPerson(name: string) { return episode.value?.castSnapshot.find(person => person.id === castForSpeaker(name)); }
 async function updateBoundPerson(name: string, field: "personality" | "aliases", value: string) {
@@ -1044,7 +1088,6 @@ async function applyLibraryItem(kind: "characters" | "styles", source: Character
   const existingPaths = new Set((await files.value.list("assets")).entries.map((entry) => `assets/${entry.name}`));
   for (const path of imagePaths) {
     if (!existingPaths.has(path)) await files.value.write(path, await libraryFiles.read(path), true);
-    await ensureImage(path);
     if (!project.value.assets.some((asset) => asset.path === path)) project.value.assets.push({ path, method: "upload", source: `公共美术库 · ${item.name}`, license: "沿用素材原有授权", prompt: item.description, model: "", createdAt: new Date().toISOString() });
   }
   if (kind === "characters") {
@@ -1075,7 +1118,6 @@ function switchImage(event: Event, panel: Panel) {
   panel.image = (event.target as HTMLSelectElement).value;
   panel.generationFingerprint = "";
   panel.approvalFingerprint = "";
-  void run("读取历史图片", () => ensureImage(panel.image));
 }
 function approvePanel(panel: Panel) {
   if (!episode.value || !panel.image || panel.generationFingerprint !== imageInput(episode.value, panel)) return;
@@ -1097,6 +1139,7 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+@use "./phoneStudio.scss" as phone;
 .discoveryModeSwitch { display:flex; gap:8px; margin-bottom:18px; button { padding:10px 16px; border:1px solid var(--studioLine); border-radius:8px; background:var(--studioCard); color:var(--studioInk); cursor:pointer; &[aria-pressed="true"] { background:var(--studioAccent); color:white; } } }
 .platformPicks { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 8px; label { display:flex; gap:6px; align-items:center; padding:9px 12px; border:1px solid var(--studioLine); border-radius:7px; margin:0; cursor:pointer; &.picked { background:var(--studioPaper); border-color:var(--studioAccent); } } }
 .adaptationBar { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin:16px 0; >div { flex:1 1 260px; } h3 { margin:0; } label { display:grid; gap:6px; } }
@@ -2485,4 +2528,6 @@ onMounted(() => {
 .productionListToggle { display: none; }
 .comicStudio .layoutStage .letteringTabs { max-height: 65vh; overflow-y: auto; flex-wrap: nowrap; button { flex-shrink: 0; } }
 @media (max-width: 760px) { .productionListToggle { display: block; padding: 12px; } .comicStudio .panelWorkspace .drawingTabs.collapsed, .comicStudio .layoutStage .letteringTabs.collapsed { display: none; } }
+@include phone.layout;
+
 </style>

@@ -1,6 +1,6 @@
 import type { Episode, Panel, Speech } from "./model";
 
-export type Files = { read: (path: string) => Promise<ArrayBuffer> };
+export type Files = { read: (path: string, signal?: AbortSignal) => Promise<ArrayBuffer> };
 export const fontFamilies = {
   sans: '"PingFang SC", "Microsoft YaHei", sans-serif',
   wenkai: '"Xiaoleng WenKai", serif',
@@ -81,14 +81,10 @@ function drawPaperTexture(context: CanvasRenderingContext2D, background: string)
   context.restore();
 }
 
-async function loadImage(files: Files, path: string) {
-  const url = URL.createObjectURL(new Blob([await files.read(path)]));
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    return image;
-  } finally { URL.revokeObjectURL(url); }
+async function loadImage(files: Files, path: string, signal?: AbortSignal) {
+  const bytes = await files.read(path, signal);
+  signal?.throwIfAborted();
+  return createImageBitmap(new Blob([bytes]));
 }
 
 export function bubblePath(shape: Speech["shape"], width = 100, height = 100, tail: "left" | "right" | "none" = "none", tailLength = .2) {
@@ -133,7 +129,7 @@ function bubble(context: CanvasRenderingContext2D, lines: string[], box: number[
   context.restore();
 }
 
-export async function drawPanel(context: CanvasRenderingContext2D, files: Files, episode: Episode, panel: Panel, box: number[], warnings?: string[], hitBoxes?: BubbleHitBox[]) {
+export async function drawPanel(context: CanvasRenderingContext2D, files: Files, episode: Episode, panel: Panel, box: number[], warnings?: string[], hitBoxes?: BubbleHitBox[], signal?: AbortSignal) {
   const [x, y, width, height] = box;
   const fontSize = episode.layout.fontSize;
   const flavor = episode.layout.comicFlavor !== false;
@@ -181,7 +177,7 @@ export async function drawPanel(context: CanvasRenderingContext2D, files: Files,
   const topHeight = safe && bubbles.length ? rows.reduce((sum, value) => sum + value + gap, 12) : 0;
   const imageHeight = height - (safe ? topHeight + captionHeight : 0);
   if (imageHeight < height * .28 || captionHeight > height * .45) throw new Error("文字占位过多，请缩短对白、减小字号或改为每页 1–2 格");
-  const image = panel.image ? await loadImage(files, panel.image) : null;
+  const image = panel.image ? await loadImage(files, panel.image, signal) : null;
   context.save();
   if (flavor) {
     context.shadowColor = "rgba(0,0,0,.24)";
@@ -194,7 +190,10 @@ export async function drawPanel(context: CanvasRenderingContext2D, files: Files,
   context.restore();
   if (image) {
     const scale = Math.min(width / image.width, imageHeight / image.height);
-    context.drawImage(image, x + (width - image.width * scale) / 2, y + (safe ? topHeight : 0) + (imageHeight - image.height * scale) / 2, image.width * scale, image.height * scale);
+    try {
+      signal?.throwIfAborted();
+      context.drawImage(image, x + (width - image.width * scale) / 2, y + (safe ? topHeight : 0) + (imageHeight - image.height * scale) / 2, image.width * scale, image.height * scale);
+    } finally { image.close(); }
   } else {
     context.save(); context.fillStyle = "#edf0ed"; context.fillRect(x, y, width, height);
     context.fillStyle = "#647269"; context.font = `24px ${family}`; context.textAlign = "center";
@@ -274,7 +273,7 @@ export function panelFrame(episode: Episode, panelIndex: number) {
   return [36 + index % columns * (width + gutter), 36 + Math.floor(index / columns) * (height + gutter), width, height];
 }
 
-export async function drawCompositionPage(context: CanvasRenderingContext2D, files: Files, episode: Episode, pageIndex: number, warnings?: string[], selectedPanelId?: string, hitBoxes?: BubbleHitBox[]) {
+export async function drawCompositionPage(context: CanvasRenderingContext2D, files: Files, episode: Episode, pageIndex: number, warnings?: string[], selectedPanelId?: string, hitBoxes?: BubbleHitBox[], signal?: AbortSignal) {
   const perPage = episode.layout.perPage;
   const offset = pageIndex * perPage;
     if (episode.layout.comicFlavor !== false) drawPaperTexture(context, episode.layout.background);
@@ -283,7 +282,7 @@ export async function drawCompositionPage(context: CanvasRenderingContext2D, fil
       context.fillRect(0, 0, 1080, 1440);
     }
     for (let index = 0; index < perPage && offset + index < episode.panels.length; index++) {
-      await drawPanel(context, files, episode, episode.panels[offset + index]!, panelFrame(episode, offset + index), warnings, episode.panels[offset + index]!.id === selectedPanelId ? hitBoxes : undefined);
+      await drawPanel(context, files, episode, episode.panels[offset + index]!, panelFrame(episode, offset + index), warnings, episode.panels[offset + index]!.id === selectedPanelId ? hitBoxes : undefined, signal);
     }
     if (episode.layout.comicFlavor !== false) {
       const pageNumber = String(Math.floor(offset / perPage) + 1).padStart(2, "0");
@@ -301,37 +300,60 @@ export async function drawCompositionPage(context: CanvasRenderingContext2D, fil
     }
 }
 
-export async function renderPages(episode: Episode, files: Files, options?: { preview: boolean; warnings: string[] }): Promise<Blob[]> {
-  if (episode.productionMode === "direct") {
-    if (!episode.directPages.length) throw new Error("请先添加整页漫画");
-    if (!options?.preview && episode.directPages.some((page) => !page.image)) throw new Error("请先补齐整页漫画图片");
-    const results: Blob[] = [];
-    for (const [index, page] of episode.directPages.entries()) {
-      const image = page.image ? await loadImage(files, page.image) : null;
-      const canvas = document.createElement("canvas");
-      canvas.width = image?.width || 1080; canvas.height = image?.height || 1440;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("浏览器不支持画布导出");
-      if (image) context.drawImage(image, 0, 0);
-      else { options?.warnings.push(`第 ${index + 1} 页尚未生成`); context.fillStyle="#f4f5f0"; context.fillRect(0,0,1080,1440); context.fillStyle="#647269"; context.font='32px sans-serif'; context.textAlign='center'; context.fillText(`第 ${index + 1} 页 · 待生成`,540,720); }
-      results.push(await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("整页导出失败")), "image/png")));
+export function comicPageCount(episode: Episode) {
+  return episode.productionMode === "direct" ? episode.directPages.length : Math.ceil(episode.panels.length / episode.layout.perPage);
+}
+
+export async function* renderPages(episode: Episode, files: Files, options?: { warnings?: string[]; index?: number; maxWidth?: number; signal?: AbortSignal }) {
+  const direct = episode.productionMode === "direct";
+  const total = comicPageCount(episode);
+  const first = options?.index ?? 0;
+  const end = options?.index === undefined ? total : Math.min(total, first + 1);
+  const required = direct ? episode.directPages.slice(first, end) : episode.panels.slice(first * episode.layout.perPage, end * episode.layout.perPage);
+  if (end <= first || (!options?.warnings && required.some(page => !page.image))) {
+    throw new Error(direct ? "请先补齐整页漫画图片" : "请先完成全部分格出图");
+  }
+  if (!direct) {
+    await document.fonts.ready;
+    await loadComicFont(episode.layout.fontFamily);
+  }
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("浏览器不支持画布导出");
+  try {
+    for (let index = first; index < end; index++) {
+      options?.signal?.throwIfAborted();
+      const path = direct ? episode.directPages[index]!.image : "";
+      const image = path ? await loadImage(files, path, options?.signal) : null;
+      try {
+        const width = image?.width || 1080;
+        const height = image?.height || 1440;
+        const ratio = options?.maxWidth ? Math.min(1, options.maxWidth / width, options.maxWidth * 1.5 / height) : 1;
+        canvas.width = Math.max(1, Math.round(width * ratio));
+        canvas.height = Math.max(1, Math.round(height * ratio));
+        options?.signal?.throwIfAborted();
+        if (image) context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        else {
+          context.scale(ratio, ratio);
+          if (!direct) await drawCompositionPage(context, files, episode, index, options?.warnings, undefined, undefined, options?.signal);
+          else {
+            options?.warnings?.push(`第 ${index + 1} 页尚未生成`);
+            context.fillStyle = "#f4f5f0";
+            context.fillRect(0, 0, 1080, 1440);
+            context.fillStyle = "#647269";
+            context.font = "32px sans-serif";
+            context.textAlign = "center";
+            context.fillText(`第 ${index + 1} 页 · 待生成`, 540, 720);
+          }
+        }
+      } finally { image?.close(); }
+      options?.signal?.throwIfAborted();
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("图片导出失败")), "image/png"));
+      options?.signal?.throwIfAborted();
+      yield blob;
     }
-    return results;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
   }
-  if (!episode.panels.length || (!options?.preview && episode.panels.some((panel) => !panel.image))) throw new Error("请先完成全部分格出图");
-  await document.fonts.ready;
-  await loadComicFont(episode.layout.fontFamily);
-  const pages: Blob[] = [];
-  const perPage = episode.layout.perPage;
-  for (let offset = 0; offset < episode.panels.length; offset += perPage) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1080;
-    canvas.height = 1440;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("浏览器不支持画布导出");
-    await drawCompositionPage(context, files, episode, offset / perPage, options?.preview ? options.warnings : undefined);
-    const blob = await new Promise<Blob>((done, reject) => canvas.toBlob((value) => value ? done(value) : reject(new Error("图片导出失败")), "image/png"));
-    pages.push(blob);
-  }
-  return pages;
 }

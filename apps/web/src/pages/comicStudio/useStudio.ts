@@ -1,16 +1,17 @@
 import { computed, onBeforeUnmount, ref, reactive, watch } from "vue";
 import axios from "axios";
 import { z } from "zod";
-import { zipSync, strToU8 } from "fflate";
+import { Zip, ZipPassThrough, zipSync, strToU8 } from "fflate";
 import { ElMessage } from "element-plus";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { useWorkspaceStore } from "@/stores/workspace";
 import saveFile from "@/lib/saveFile";
+import { isMobile, isRemoteMobile } from "@/lib/platform";
 import { uiSettings, settings as appSettings } from "@/stores/settings";
 import { projectSchema, characterSchema, assetRecordSchema, feedbackSchema, insightSchema, memeIdeaSchema, createEpisode, newPanel, imageInput, imagePrompt, identityPanelInput, referencePaths, isApproved, splitDialogue, characterPrompt, publicationText, bindCast, matchingCharacter, directPageInput, productionReady } from "./model";
 import type { ComicProject, Topic, Panel, ArtStyle, MemeIdea, Character } from "./model";
 import { keywordInsights } from "./creatorInsights";
-import { renderPages } from "./render";
+import { comicPageCount, renderPages } from "./render";
 
 type Model = { providerId: string; modelId: string; label: string; type?: string; configured?: boolean };
 const planSchema = z.object({
@@ -34,6 +35,7 @@ const planSchema = z.object({
 
 export default function useStudio() {
   const workspace = useWorkspaceStore();
+  const phoneLocal = isMobile && !isRemoteMobile;
   const archivedProjects = ref<{ directory: string; name: string }[]>([]);
   const directory = ref("");
   const files = computed(() => useWorkspaceFiles(directory.value));
@@ -50,11 +52,15 @@ export default function useStudio() {
   const dirty = computed(() => Boolean(project.value && JSON.stringify(project.value) !== savedText.value));
   const episode = computed(() => project.value?.episodes.find((item) => item.id === project.value?.activeEpisodeId));
   const activeStyle = computed(() => project.value?.styles.find((item) => item.id === project.value?.activeStyleId));
-  const imageUrls = reactive<Record<string, string>>({});
   const previewUrls = ref<string[]>([]);
+  const previewPage = ref(0);
+  const previewCount = computed(() => episode.value ? comicPageCount(episode.value) : 0);
+  watch(() => episode.value?.id, () => { previewPage.value = 0; });
+  watch(previewCount, count => { previewPage.value = Math.min(previewPage.value, Math.max(count - 1, 0)); });
   const previewMessage = ref("");
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
-  let previewVersion = 0;
+  let previewController: AbortController | undefined;
+  const previewActive = ref(true);
   const textModels = ref<Model[]>([]);
   const imageModels = ref<Model[]>([]);
   const textModel = ref("");
@@ -65,6 +71,10 @@ export default function useStudio() {
   const discoveryPlatforms = ref(z.array(z.enum(["douyin", "bilibili", "xhsLocal", "tieba", "douban"])).catch(["douyin", "bilibili", "xhsLocal"]).parse(appSettings.value.comicDiscoveryPlatforms));
   const discoveryMode = ref(z.enum(["satire", "science", "drama"]).catch("satire").parse(appSettings.value.comicDiscoveryMode));
   const discoveryTone = ref(z.string().max(80).catch("").parse(appSettings.value.comicDiscoveryTone));
+  if (phoneLocal) {
+    discoveryPlatforms.value = discoveryPlatforms.value.filter(item => item === "tieba" || item === "douban");
+    if (!discoveryPlatforms.value.length && !Array.isArray(appSettings.value.comicDiscoveryPlatforms)) discoveryPlatforms.value = ["tieba", "douban"];
+  }
   watch(discoveryPlatforms, value => { appSettings.value.comicDiscoveryPlatforms = value; }, { deep: true });
   watch(discoveryMode, value => { appSettings.value.comicDiscoveryMode = value; });
   watch(discoveryTone, value => { appSettings.value.comicDiscoveryTone = value; });
@@ -73,7 +83,7 @@ export default function useStudio() {
   const referenceAnalysisMode = ref(z.enum(["selected", "codex", "api"]).catch("selected").parse(appSettings.value.comicReferenceAnalysisMode));
   watch(referenceAnalysisMode, (value) => { appSettings.value.comicReferenceAnalysisMode = value; });
   watch(zImageReferenceMode, (value) => { appSettings.value.comicZImageReferenceMode = value; });
-  const textMode = ref<"codex" | "api">("codex");
+  const textMode = ref<"codex" | "api">(phoneLocal ? "api" : "codex");
   const codexModel = ref("gpt-6.1-sol");
   const textEffort = ref<"low" | "medium" | "high" | "xhigh">("medium");
   const studioTheme = ref<"paper" | "night">("paper");
@@ -82,7 +92,8 @@ export default function useStudio() {
   const preferenceSchema = z.object({ textEffort: z.enum(["low", "medium", "high", "xhigh"]).default("medium"), textMode: z.enum(["codex", "api"]), codexModel: z.string().max(101), textModel: z.string().max(800), imageModel: z.string().max(800), theme: z.enum(["paper", "night"]), accent: z.enum(["forest", "blue", "coral"]), density: z.enum(["standard", "large"]) });
   const restored = preferenceSchema.safeParse(appSettings.value.comicStudio);
   if (restored.success) {
-    textMode.value = restored.data.textMode;
+    textMode.value = phoneLocal ? "api" : restored.data.textMode;
+    if (phoneLocal && referenceAnalysisMode.value === "codex") referenceAnalysisMode.value = "selected";
     codexModel.value = restored.data.codexModel;
     textEffort.value = restored.data.textEffort;
     textModel.value = restored.data.textModel;
@@ -91,7 +102,7 @@ export default function useStudio() {
     studioAccent.value = restored.data.accent;
     studioDensity.value = restored.data.density;
   }
-  if (!appSettings.value.ui) appSettings.value.ui = { theme: studioTheme.value === "night" ? "dark" : "light", primaryColor: { forest: "#315e44", blue: "#326b92", coral: "#a75237" }[studioAccent.value], fontScale: studioDensity.value === "large" ? 115 : 100 };
+  if (!appSettings.value.ui) appSettings.value.ui = { ...(phoneLocal ? { language: "zh-CN" } : {}), theme: studioTheme.value === "night" ? "dark" : "light", primaryColor: { forest: "#315e44", blue: "#326b92", coral: "#a75237" }[studioAccent.value], fontScale: studioDensity.value === "large" ? 115 : 100 };
   const preferredDark = window.matchMedia("(prefers-color-scheme: dark)");
   function synchronizeAppearance() { studioTheme.value = (uiSettings.value.theme === "system" ? preferredDark.matches : uiSettings.value.theme === "dark") ? "night" : "paper"; studioDensity.value = uiSettings.value.fontScale >= 110 ? "large" : "standard"; }
   watch(uiSettings, synchronizeAppearance, { immediate: true });
@@ -137,49 +148,22 @@ export default function useStudio() {
   const approvedCount = computed(() => episode.value?.panels.filter((panel) => isApproved(episode.value!, panel)).length ?? 0);
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
   watch(
-    () => JSON.stringify({ stage: stage.value, id: episode.value?.id, mode: episode.value?.productionMode, pages: episode.value?.directPages, layout: episode.value?.layout, panels: episode.value?.panels.map((panel) => [panel.image, panel.dialogue, panel.caption, panel.bubbleX, panel.bubbleY, panel.speech]) }),
+    () => JSON.stringify({ active: previewActive.value, stage: stage.value, index: isMobile ? previewPage.value : undefined, id: episode.value?.id, mode: episode.value?.productionMode, pages: episode.value?.directPages, layout: episode.value?.layout, panels: episode.value?.panels.map(panel => [panel.image, panel.dialogue, panel.caption, panel.speech, panel.sfx]) }),
     () => {
       clearTimeout(previewTimer);
-      previewVersion++;
-      previewUrls.value.forEach(URL.revokeObjectURL);
-      previewUrls.value = [];
+      clearPreview();
       previewMessage.value = "";
-      if (![5, 6, 7].includes(stage.value) || !episode.value || !(episode.value.productionMode === "direct" ? episode.value.directPages.length : episode.value.panels.length)) return;
+      if (!previewActive.value || ![5, 6, 7].includes(stage.value) || (isMobile && stage.value === 5) || !previewCount.value) return;
       previewTimer = setTimeout(() => {
-        void preview().catch((error) => { previewMessage.value = error instanceof Error ? error.message : "排版预览失败"; });
-      }, 400);
+        void preview().catch(error => { previewMessage.value = error instanceof Error ? error.message : "排版预览失败"; });
+      }, 300);
     },
   );
 
-  function clearUrls() {
-    Object.values(imageUrls).forEach(URL.revokeObjectURL);
-    Object.keys(imageUrls).forEach((key) => delete imageUrls[key]);
+  function clearPreview() {
+    previewController?.abort();
     previewUrls.value.forEach(URL.revokeObjectURL);
     previewUrls.value = [];
-  }
-
-  async function ensureImage(path: string) {
-    if (!path || imageUrls[path]) return;
-    const targetDirectory = directory.value;
-    const bytes = await useWorkspaceFiles(targetDirectory).read(path);
-    if (directory.value === targetDirectory) imageUrls[path] = URL.createObjectURL(new Blob([bytes]));
-  }
-
-  async function hydrateImages() {
-    if (!project.value) return;
-    const paths = new Set(
-      [
-        ...project.value.assets.map((item) => item.path),
-        ...project.value.styleDraft.refs.map((item) => item.path),
-        ...project.value.styles.flatMap((style) => style.refs.map((item) => item.path)),
-        ...project.value.characters.flatMap((item) => [item.image, ...item.designImages.map((design) => design.path), ...item.refs.map((ref) => ref.path)]),
-        ...project.value.episodes.flatMap((item) => [
-          ...item.castSnapshot.flatMap((character) => [character.image, ...character.designImages.map((design) => design.path), ...character.refs.map((ref) => ref.path)]),
-          ...[...item.panels, ...item.directPages].flatMap((panel) => [panel.image, ...panel.history]),
-        ]),
-      ].filter(Boolean),
-    );
-    await Promise.all([...paths].map(ensureImage));
   }
 
   async function run(label: string, action: () => Promise<unknown>) {
@@ -271,7 +255,7 @@ export default function useStudio() {
     await save();
     archivedProjects.value.push({ directory: directory.value, name: project.value.title });
     workspace.removeProject(directory.value);
-    clearUrls();
+    clearPreview();
     project.value = undefined;
     directory.value = "";
     savedText.value = "";
@@ -293,9 +277,19 @@ export default function useStudio() {
     const selected = [...new Set(platforms)].filter((item) => ["xhsLocal", "douyin", "bilibili", "tieba", "douban"].includes(item));
     if (!selected.length) throw new Error("请至少选择一个平台");
     researchStatus.value = "正在按同一关键词检索所选平台…";
-    const results = await Promise.allSettled(selected.map(async (platform) => { if (["douban", "tieba"].includes(platform)) { try { const result = await axios.get("/api/comicStudio/forumTopics", { params: { source: platform, keyword }, headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }); if (result.data.data.items?.length) return result; } catch { /* Try the user's platform browser when the public source is unavailable. */ } return axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers: { "x-toonflow-workspace": "1" }, timeout: 45000 }); } return platform === "xhsLocal"
-      ? axios.get("/api/comicStudio/topics", { params: { source: "xhsLocal", keyword }, headers: { "x-toonflow-workspace": "1" }, timeout: 100000 })
-      : axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers: { "x-toonflow-workspace": "1" }, timeout: 45000 }); }));
+    const headers = { "x-toonflow-workspace": "1" };
+    const results = await Promise.allSettled(selected.map(async (platform) => {
+      if (platform === "tieba" || platform === "douban") {
+        const publicResults = await axios.get("/api/comicStudio/forumTopics", { params: { source: platform, keyword }, headers, timeout: 25000 }).catch(error => {
+          if (phoneLocal) throw error;
+          return undefined;
+        });
+        if (phoneLocal || publicResults?.data.data.items?.length) return publicResults!;
+      }
+      return platform === "xhsLocal"
+        ? axios.get("/api/comicStudio/topics", { params: { source: "xhsLocal", keyword }, headers, timeout: 100000 })
+        : axios.post("/api/comicStudio/platformSession", { platform, action: "search", keyword }, { headers, timeout: 45000 });
+    }));
     if (directory.value !== targetDirectory) throw new Error("创作空间已切换，本次素材没有写入其他空间");
     const materials: Topic[] = [];
     const statuses = results.map((result, index) => {
@@ -394,7 +388,6 @@ export default function useStudio() {
     const path = data.data[0].path;
     project.value.assets.push({ path, method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "自定义画风样张", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt, model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
     draft.refs.push({ id: crypto.randomUUID(), path, source: "自定义 AI 生成", note: "画风样张；提示词保存在素材档案", license: "待确认供应商条款" });
-    await ensureImage(path);
     await save();
   }
 
@@ -406,14 +399,13 @@ export default function useStudio() {
       const legacy = `${work.title}\n\n本作品为原创虚构漫画，AI辅助创作。${work.topic.url ? `\n参考来源：${work.topic.url}` : work.researchPackId ? "\n参考素材已保存在项目专题素材包中。" : ""}`;
       if (work.postText === legacy) work.postText = work.title;
     }
-    clearUrls();
+    clearPreview();
     directory.value = path;
     revision = snapshot.revision;
     project.value = data;
     savedText.value = JSON.stringify(data);
     await workspace.openProject(path);
     workspace.renameProject(path, data.title);
-    await hydrateImages();
     stage.value = 0;
     changeReason.value = "";
   }
@@ -427,21 +419,21 @@ export default function useStudio() {
   let modelLoadVersion = 0;
   async function loadModels() {
     const version = ++modelLoadVersion;
-    const results = await Promise.allSettled([axios.get("/api/ai/models"), axios.get("/api/ai/media/models"), axios.get("/api/providers/media/list"), axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }), axios.get("/api/comicStudio/zImageStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 8000 })]);
+    const results = await Promise.allSettled([axios.get("/api/ai/models"), axios.get("/api/ai/media/models"), axios.get("/api/providers/media/list"), phoneLocal ? undefined : axios.get("/api/comicStudio/cliStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 25000 }), phoneLocal ? undefined : axios.get("/api/comicStudio/zImageStatus", { headers: { "x-toonflow-workspace": "1" }, timeout: 8000 })]);
     if (version !== modelLoadVersion) return;
     if (results[0].status === "fulfilled") textModels.value = results[0].value.data.data;
     if (results[1].status === "fulfilled") {
       const metadata = results[2].status === "fulfilled" ? z.array(z.object({ id: z.string(), label: z.string().optional(), rules: z.array(z.object({ field: z.string().optional() })).optional() })).safeParse(results[2].value.data.data) : undefined;
       const configurations = appSettings.value.mediaProviderConfigs as Record<string, { apiKey?: string; workflow?: string; baseUrl?: string; modelId?: string }> | undefined;
-      imageModels.value = results[1].value.data.data.filter((item: Model) => item.type === "image").map((item: Model) => {
+      imageModels.value = results[1].value.data.data.filter((item: Model) => item.type === "image" && (!phoneLocal || item.providerId !== "comfyLocal")).map((item: Model) => {
         const provider = metadata?.success ? metadata.data.find((entry) => entry.id === item.providerId) : undefined;
         const configured = item.providerId.startsWith("imageApi") ? !!configurations?.[item.providerId]?.apiKey?.trim() && !!configurations?.[item.providerId]?.baseUrl?.trim() && !!configurations?.[item.providerId]?.modelId?.trim() : item.providerId === "comfyLocal" ? !!configurations?.comfyLocal?.workflow?.trim() : !!provider && (!provider.rules?.some((rule) => rule.field === "apiKey") || !!configurations?.[item.providerId]?.apiKey?.trim());
         return { ...item, configured, label: configured ? (item.providerId.startsWith("imageApi") ? `${provider?.label || "在线API"} · ${configurations?.[item.providerId]?.modelId || item.label}` : item.providerId === "comfyLocal" ? `本地 ComfyUI · ${item.label}（工作流已保存）` : item.label) : `${item.label}（未完成配置）` };
       });
     }
-    const cli = results[3].status === "fulfilled" ? results[3].value.data.data : undefined;
+    const cli = results[3].status === "fulfilled" ? results[3].value?.data.data : undefined;
     imageModels.value = imageModels.value.filter((item) => !["codex", "zImage", "fluxKlein"].includes(item.providerId));
-    const localImage = results[4].status === "fulfilled" ? results[4].value.data.data : undefined;
+    const localImage = results[4].status === "fulfilled" ? results[4].value?.data.data : undefined;
     if (localImage?.installed && localImage.modelReady) imageModels.value.push({ providerId: "zImage", modelId: "turbo4bit", label: "Z-Image Turbo · 本机 MLX", type: "image", configured: true });
     if (localImage?.fluxKlein?.installed && localImage.fluxKlein.modelReady) imageModels.value.push({ providerId: "fluxKlein", modelId: "klein4bit", label: "FLUX.2 klein · 本机多角色参考", type: "image", configured: true });
     if (cli?.available && cli.loggedIn && cli.imageGeneration) imageModels.value.push({ providerId: "codex", modelId: "imagegen", label: "Codex 内置生图 · 需联网", type: "image", configured: true });
@@ -753,7 +745,6 @@ export default function useStudio() {
     const extension = file.type === "image/jpeg" ? "jpg" : file.type === "image/webp" ? "webp" : "png";
     const path = `assets/${crypto.randomUUID()}.${extension}`;
     await files.value.write(path, file, true);
-    await ensureImage(path);
     project.value?.assets.push({ path, method: "upload", source: "本地导入", license: "待确认", prompt: "", model: "", createdAt: new Date().toISOString() });
     return path;
   }
@@ -873,7 +864,6 @@ export default function useStudio() {
   async function adoptImage(panel: Panel, file: Blob | string, fingerprint = episode.value ? imageInput(episode.value, panel) : "", compareFirst = false) {
     const path = typeof file === "string" ? assetRecordSchema.shape.path.parse(file) : await putImage(file);
     if (typeof file === "string") {
-      await ensureImage(path);
       if (project.value && !project.value.assets.some((item) => item.path === path)) project.value.assets.push({ path, method: "unknown", source: "图片服务输出", license: "待确认", prompt: "", model: "", createdAt: new Date().toISOString() });
     }
     if (panel.image && !panel.history.includes(panel.image)) panel.history.push(panel.image);
@@ -917,7 +907,6 @@ export default function useStudio() {
     character.designImages.push({ path, view: character.designView });
     if (!character.image) character.image = path;
     project.value?.assets.push({ path, method: ["zImage", "fluxKlein"].includes(model.providerId) ? "local" : model.providerId === "codex" ? "codex" : "imageApi", source: "软件角色生成", license: "待按供应商条款确认用途", seed: data.data?.[0]?.seed, prompt: characterPrompt(character, style, ["zImage", "fluxKlein"].includes(model.providerId)), model: `${model.providerId}/${model.modelId}`, createdAt: new Date().toISOString() });
-    await ensureImage(path);
     await save();
   }
 
@@ -1117,13 +1106,26 @@ export default function useStudio() {
   async function preview() {
     const current = episode.value;
     if (!current) throw new Error("请先选择作品");
-    const version = ++previewVersion;
+    clearPreview();
+    const controller = new AbortController();
+    previewController = controller;
+    const index = isMobile ? previewPage.value : undefined;
     const warnings: string[] = [];
-    const pages = await renderPages(clone(current), useWorkspaceFiles(directory.value), { preview: true, warnings });
-    if (version !== previewVersion) return;
-    previewUrls.value.forEach(URL.revokeObjectURL);
-    previewUrls.value = pages.map(URL.createObjectURL);
-    previewMessage.value = [...new Set(warnings)].join("；");
+    const next: string[] = [];
+    let committed = false;
+    try {
+      for await (const page of renderPages(clone(current), useWorkspaceFiles(directory.value), { warnings, index, maxWidth: isMobile ? 1080 : undefined, signal: controller.signal })) {
+        next[index ?? next.length] = URL.createObjectURL(page);
+      }
+      if (controller.signal.aborted) return;
+      previewUrls.value = next;
+      committed = true;
+      previewMessage.value = [...new Set(warnings)].join("；");
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      if (!committed) next.forEach(URL.revokeObjectURL);
+    }
   }
 
   async function generatePost() {
@@ -1151,31 +1153,61 @@ export default function useStudio() {
     return data.data;
   }
 
-  async function exportImages() {
-    if (!episode.value || !productionReady(episode.value)) throw new Error("请先补齐分格图片");
-    const pages = await renderPages(episode.value, files.value);
-    if (pages.length === 1) await saveFile(pages[0]!, "comicPage.png");
-    else {
-      const archive: Record<string, Uint8Array> = {};
-      for (let i = 0; i < pages.length; i++) archive[`page${i + 1}.png`] = new Uint8Array(await pages[i]!.arrayBuffer());
-      await saveFile(new Blob([zipSync(archive)]), "comicPages.zip");
+  function createExportArchive() {
+    const chunks: BlobPart[] = [];
+    let size = 0;
+    const zip = new Zip((error, chunk) => {
+      if (error) throw error;
+      size += chunk.byteLength;
+      if (isMobile && size > 100 * 1024 * 1024) throw new Error("手机单次导出上限为 100 MB，请减少页数或导出当前页。");
+      chunks.push(chunk);
+    });
+    return {
+      async add(name: string, data: Blob | Uint8Array<ArrayBuffer>) {
+        const entry = new ZipPassThrough(name);
+        zip.add(entry);
+        if (data instanceof Blob) {
+          for await (const chunk of data.stream()) entry.push(chunk);
+          entry.push(new Uint8Array(), true);
+        } else entry.push(data, true);
+      },
+      finish() {
+        zip.end();
+        return new Blob(chunks, { type: "application/zip" });
+      },
+    };
+  }
+
+  async function exportImages(singlePage = false) {
+    const current = episode.value;
+    if (!current || (!singlePage && !productionReady(current))) throw new Error("请先补齐分格图片");
+    const index = singlePage ? previewPage.value : undefined;
+    const pages = renderPages(current, files.value, { index });
+    if (singlePage || comicPageCount(current) === 1) {
+      for await (const page of pages) await saveFile(page, singlePage ? `comicPage${previewPage.value + 1}.png` : "comicPage.png");
+      return;
     }
+    const archive = createExportArchive();
+    let number = 0;
+    for await (const page of pages) await archive.add(`page${++number}.png`, page);
+    await saveFile(archive.finish(), "comicPages.zip");
   }
 
   async function exportPackage() {
     const current = episode.value;
     if (!current || !productionReady(current)) throw new Error("请先补齐分格图片，再导出");
     const taskFiles = useWorkspaceFiles(directory.value);
-    const pages = await renderPages(current, taskFiles);
-    const archive: Record<string, Uint8Array> = {};
-    for (let index = 0; index < pages.length; index++)
-      archive[`page${String(index + 1).padStart(2, "0")}.png`] = new Uint8Array(await pages[index]!.arrayBuffer());
-    const cover = pages[Math.min(current.coverPage ?? 0, pages.length - 1)];
-    if (cover) archive["cover.png"] = new Uint8Array(await cover.arrayBuffer());
-    archive["publish.txt"] = strToU8(publicationText(current));
-    archive["internalReview.txt"] = strToU8(`仅供创作者审核，不是发布正文。\n生成方式：请结合素材来源记录确认 AI 辅助情况，并按发布平台要求完成标识。\n参考来源：${current.topic.url || current.topic.source}\n风格版本：${current.styleSnapshot?.name} (${current.styleSnapshot?.id})\n参考素材包：${current.researchPackId || "无"}\n`);
-    archive["readme.txt"] = strToU8(`小冷漫画发布包\n${current.productionMode === "direct" ? "整页成品按模型原始尺寸导出 PNG，不重复叠加字幕" : "成品为 1080×1440 PNG"}，按 page01、page02 顺序发布。\n${current.productionMode === "direct" ? "整页包含模型绘制或导入的对白，请核对错字和画面内容。" : `每页 ${current.layout.perPage} 格；字体 ${current.layout.fontFamily}；文字模式 ${current.layout.textMode}。文字已经绘制进 PNG，不依赖读者安装字体。`}\nepisode.json 保留故事、分镜、多角色对白、角色与美术快照。assets 为实际使用的原始图片。\n发布前请按平台要求声明 AI 辅助创作，软件未自动发布。\n`);
-    archive["episode.json"] = strToU8(JSON.stringify(current, null, 2));
+    const archive = createExportArchive();
+    const coverIndex = Math.min(current.coverPage ?? 0, comicPageCount(current) - 1);
+    let index = 0;
+    for await (const page of renderPages(current, taskFiles)) {
+      await archive.add(`page${String(index + 1).padStart(2, "0")}.png`, page);
+      if (index++ === coverIndex) await archive.add("cover.png", page);
+    }
+    await archive.add("publish.txt", strToU8(publicationText(current)));
+    await archive.add("internalReview.txt", strToU8(`仅供创作者审核，不是发布正文。\n生成方式：请结合素材来源记录确认 AI 辅助情况，并按发布平台要求完成标识。\n参考来源：${current.topic.url || current.topic.source}\n风格版本：${current.styleSnapshot?.name} (${current.styleSnapshot?.id})\n参考素材包：${current.researchPackId || "无"}\n`));
+    await archive.add("readme.txt", strToU8(`小冷漫画发布包\n${current.productionMode === "direct" ? "整页成品按模型原始尺寸导出 PNG，不重复叠加字幕" : "成品为 1080×1440 PNG"}，按 page01、page02 顺序发布。\n${current.productionMode === "direct" ? "整页包含模型绘制或导入的对白，请核对错字和画面内容。" : `每页 ${current.layout.perPage} 格；字体 ${current.layout.fontFamily}；文字模式 ${current.layout.textMode}。文字已经绘制进 PNG，不依赖读者安装字体。`}\nepisode.json 保留故事、分镜、多角色对白、角色与美术快照。assets 为实际使用的原始图片。\n发布前请按平台要求声明 AI 辅助创作，软件未自动发布。\n`));
+    await archive.add("episode.json", strToU8(JSON.stringify(current, null, 2)));
     const paths = new Set(
       [
         ...current.panels.flatMap((panel) => [panel.image, ...referencePaths(current, panel)]),
@@ -1183,9 +1215,9 @@ export default function useStudio() {
         ...current.castSnapshot.map((character) => character.image),
       ].filter(Boolean),
     );
-    archive["assetProvenance.json"] = strToU8(JSON.stringify((project.value?.assets || []).filter((item) => paths.has(item.path)), null, 2));
-    for (const path of paths) archive[path] = new Uint8Array(await taskFiles.read(path));
-    const blob = new Blob([zipSync(archive)]);
+    await archive.add("assetProvenance.json", strToU8(JSON.stringify((project.value?.assets || []).filter(item => paths.has(item.path)), null, 2)));
+    for (const path of paths) await archive.add(path, new Uint8Array(await taskFiles.read(path)));
+    const blob = archive.finish();
     const output = `comicExport${Date.now()}.zip`;
     await save();
     await taskFiles.write(output, blob, true);
@@ -1204,8 +1236,7 @@ export default function useStudio() {
     clearInterval(generationTimer);
     stopLoginPolling();
     clearTimeout(previewTimer);
-    previewVersion++;
-    clearUrls();
+    clearPreview();
     window.removeEventListener("beforeunload", beforeUnload);
   });
 
@@ -1257,8 +1288,10 @@ export default function useStudio() {
     dirty,
     episode,
     activeStyle,
-    imageUrls,
     previewUrls,
+    previewPage,
+    previewCount,
+    previewActive,
     previewMessage,
     studioTheme,
     studioAccent,
@@ -1316,6 +1349,5 @@ export default function useStudio() {
     exportPackage,
     exportImages,
     analyzeLibrary,
-    ensureImage,
   };
 }
