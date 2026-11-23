@@ -1,0 +1,78 @@
+name: Stage Xiaoleng desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 目标 Release 标签
+        type: string
+        required: true
+      buildRun:
+        description: 对应该标签的桌面构建 Run ID
+        type: string
+        required: true
+      target:
+        description: 要上传的安装包
+        type: choice
+        options: [windowsX64, macArm64, macX64]
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: xiaoleng-stage-${{ inputs.tag }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      releaseTag: ${{ inputs.tag }}
+      buildRun: ${{ inputs.buildRun }}
+      target: ${{ inputs.target }}
+    steps:
+      - name: 核对草稿及构建来源
+        id: version
+        run: |
+          [[ "$releaseTag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$buildRun" =~ ^[0-9]+$ ]]
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$releaseTag")
+          sha=$(jq -er '.object.sha' <<< "$ref")
+          if [[ $(jq -er '.object.type' <<< "$ref") == tag ]]; then
+            sha=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object | select(.type == "commit") | .sha')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          built=$(gh api "repos/$GH_REPO/actions/runs/$buildRun")
+          [[ $(jq -er '.head_sha' <<< "$built") == "$sha" ]]
+          [[ $(gh release view "$releaseTag" --json isDraft --jq .isDraft) == true ]]
+          printf 'version=%s\n' "${releaseTag#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        with:
+          name: toonflow-${{ steps.version.outputs.version }}-${{ inputs.target }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.buildRun }}
+          path: artifacts
+      - name: 核对安装包和更新清单
+        env:
+          version: ${{ steps.version.outputs.version }}
+        run: |
+          cd artifacts
+          case "$target" in
+            windowsX64) prefix=stable-win-x64; suffix=windows-x64.exe; installer="toonflow-$version-Setup.exe" ;;
+            macArm64) prefix=stable-macos-arm64; suffix=macos-arm64.dmg; installer=macos-arm64-xiaolengComic.dmg ;;
+            macX64) prefix=stable-macos-x64; suffix=macos-x64.dmg; installer=macos-x64-xiaolengComic.dmg ;;
+            *) exit 2 ;;
+          esac
+          manifest="$prefix-update.json"
+          fallback=
+          if [[ "$target" == macX64 ]]; then fallback="$prefix-xiaolengComic.app.tar.zst"; fi
+          archive=$(jq -er --arg v "$version" --arg f "$fallback" 'select(.version == $v) | .artifact.file // $f' "$manifest")
+          [[ "$archive" == "$prefix-"*.tar.zst && "$archive" =~ ^[a-zA-Z0-9._-]+$ ]]
+          test -s "$archive" && test -s "$installer"
+          publicName="xiaolengComic-$version-$suffix"
+          mv -- "$installer" "$publicName"
+          sha256sum -- "$publicName" "$manifest" "$archive" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh release upload "$releaseTag" "$publicName" "$manifest" "$archive"

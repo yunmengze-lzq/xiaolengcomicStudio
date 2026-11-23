@@ -170,6 +170,10 @@ jobs:
         if: matrix.target == 'macX64'
         working-directory: compat/macIntel
         run: bun install --frozen-lockfile
+      - name: 连接 Intel 构建的项目配置
+        if: matrix.target == 'macX64'
+        # ACT: Intel 兼容构建复制桌面源码至 compat 下，保留根配置的相对导入。
+        run: ln -s ../appConfig.ts compat/appConfig.ts
       - name: 编译 macOS 13 Intel 原生 SDK
         if: matrix.target == 'macX64'
         run: bun compat/macIntel/prepareNative.ts
