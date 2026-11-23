@@ -1,4 +1,4 @@
-import { appVersion, repositoryUrl } from "./appConfig.ts";
+import { appIdentifier, appVersion, repositoryUrl } from "./appConfig.ts";
 import type { ElectrobunConfig } from "./.hutch/devkit/api/config/ElectrobunConfig";
 
 const startupTarget = process.platform === "darwin" ? (process.arch === "x64" ? "macX64" : "macArm64") : "windowsX64";
@@ -6,7 +6,7 @@ const startupTarget = process.platform === "darwin" ? (process.arch === "x64" ? 
 export default {
   app: {
     name: "xiaolengComic",
-    identifier: "local.xiaoleng.comic",
+    identifier: appIdentifier,
     version: appVersion,
     urlSchemes: ["toonflow"],
   },
