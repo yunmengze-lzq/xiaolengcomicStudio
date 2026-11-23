@@ -71,7 +71,7 @@ jobs:
           case "$target" in
             windowsX64) prefix=stable-win-x64; suffix=windows-x64.exe; installer="toonflow-$version-Setup.exe" ;;
             macArm64) prefix=stable-macos-arm64; suffix=macos-arm64.dmg; installer=macos-arm64-xiaolengComic.dmg ;;
-            macX64) prefix=stable-macos-x64; suffix=macos-x64.dmg; installer=macos-x64-xiaolengComic.dmg ;;
+            macX64) prefix=stable-macos-x64; suffix=macos-x64.dmg; installer=stable-macos-x64-xiaolengComic.dmg ;;
             *) exit 2 ;;
           esac
           manifest="$prefix-update.json"
@@ -79,7 +79,9 @@ jobs:
           if [[ "$target" == macX64 ]]; then fallback="$prefix-xiaolengComic.app.tar.zst"; fi
           archive=$(jq -er --arg v "$version" --arg f "$fallback" 'select(.version == $v) | .artifact.file // $f' "$manifest")
           [[ "$archive" == "$prefix-"*.tar.zst && "$archive" =~ ^[a-zA-Z0-9._-]+$ ]]
-          test -s "$archive" && test -s "$installer"
+          for required in "$archive" "$installer"; do
+            if [[ ! -s "$required" ]]; then printf '缺少构建文件 %s\n' "$required" >&2; exit 1; fi
+          done
           publicName="xiaolengComic-$version-$suffix"
           mv -- "$installer" "$publicName"
           sha256sum -- "$publicName" "$manifest" "$archive" | tee "$RUNNER_TEMP/stagedSha256" >> "$GITHUB_STEP_SUMMARY"
